@@ -551,6 +551,43 @@ textarea:focus {
   margin: 0 0 10px;
 }
 
+.auth-header {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.auth-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(27, 26, 23, 0.06);
+  border: 1px solid var(--stroke);
+  margin-bottom: 18px;
+}
+
+.auth-tab {
+  border: none;
+  background: transparent;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-tab.is-active {
+  background: white;
+  color: var(--accent-strong);
+  box-shadow: var(--shadow-soft);
+}
+
+.only-signup {
+  display: none;
+}
+
 .auth-actions {
   display: flex;
   gap: 12px;

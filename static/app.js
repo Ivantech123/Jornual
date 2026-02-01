@@ -39,14 +39,41 @@
 
   const status = document.querySelector("[data-auth-status]");
   const actionField = authForm.querySelector("[name='action']");
-  const actionButtons = authForm.querySelectorAll("[data-action]");
-  actionButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      if (actionField) {
-        actionField.value = button.dataset.action || "login";
-      }
+  const title = document.querySelector("[data-auth-title]");
+  const subtitle = document.querySelector("[data-auth-subtitle]");
+  const note = document.querySelector("[data-auth-note]");
+  const submit = authForm.querySelector("[data-auth-submit]");
+  const tabs = document.querySelectorAll("[data-auth-mode]");
+  const signupOnly = authForm.querySelectorAll(".only-signup");
+
+  const setMode = (mode) => {
+    const isSignup = mode === "signup";
+    if (actionField) actionField.value = mode;
+    if (submit) submit.textContent = isSignup ? "Создать аккаунт" : "Войти";
+    if (title) title.textContent = isSignup ? "Регистрация" : "Вход в журнал";
+    if (subtitle) {
+      subtitle.textContent = isSignup
+        ? "Создайте аккаунт. Доступ к журналу выдаётся по инвайту."
+        : "Авторизация для учителей. Доступ к журналу по инвайту.";
+    }
+    if (note) {
+      note.style.display = isSignup ? "block" : "none";
+    }
+    signupOnly.forEach((field) => {
+      field.style.display = isSignup ? "block" : "none";
+    });
+    tabs.forEach((tab) => {
+      tab.classList.toggle("is-active", tab.dataset.authMode === mode);
+    });
+  };
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      setMode(tab.dataset.authMode || "login");
     });
   });
+
+  setMode((actionField && actionField.value) || "login");
   const setStatus = (message, isError = false) => {
     if (!status) return;
     status.textContent = message;
@@ -78,6 +105,7 @@
     const email = authForm.querySelector("[name='email']").value.trim();
     const password = authForm.querySelector("[name='password']").value;
     const action = (actionField && actionField.value) || "login";
+    const confirm = authForm.querySelector("[name='password_confirm']");
 
     if (!email || !password) {
       setStatus("Введите email и пароль.", true);
@@ -87,6 +115,10 @@
     setStatus("Проверяем данные...");
 
     try {
+      if (action === "signup" && confirm && password !== confirm.value) {
+        setStatus("Пароли не совпадают.", true);
+        return;
+      }
       if (action === "signup") {
         const { data, error } = await client.auth.signUp({
           email,

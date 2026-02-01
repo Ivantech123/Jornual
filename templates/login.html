@@ -3,8 +3,15 @@
 {% block content %}
 <section class="auth-layout">
   <div class="auth-card">
-    <h1>Вход в журнал</h1>
-    <p class="muted">Авторизация через Supabase. После регистрации нужен инвайт для доступа к журналу учителя.</p>
+    <div class="auth-header">
+      <h1 data-auth-title>Вход в журнал</h1>
+      <p class="muted" data-auth-subtitle>Авторизация для учителей. Доступ к журналу по инвайту.</p>
+    </div>
+
+    <div class="auth-tabs" role="tablist">
+      <button type="button" class="auth-tab is-active" data-auth-mode="login">Вход</button>
+      <button type="button" class="auth-tab" data-auth-mode="signup">Регистрация</button>
+    </div>
 
     {% if not supabase_url or not supabase_anon_key %}
       <div class="flash flash-error">
@@ -21,11 +28,15 @@
           <span>Пароль</span>
           <input type="password" name="password" placeholder="••••••••" required>
         </label>
+        <label class="only-signup">
+          <span>Повторите пароль</span>
+          <input type="password" name="password_confirm" placeholder="••••••••">
+        </label>
         <div class="auth-actions">
-          <button type="submit" class="primary" data-action="login">Войти</button>
-          <button type="submit" class="secondary" data-action="signup">Зарегистрироваться</button>
+          <button type="submit" class="primary" data-auth-submit>Войти</button>
         </div>
       </form>
+      <p class="auth-note" data-auth-note>При регистрации подтвердите email в письме от Supabase.</p>
       <p class="auth-note" data-auth-status></p>
     {% endif %}
   </div>
