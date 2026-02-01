@@ -34,11 +34,13 @@ python app.py
 - `ADMIN_EMAILS` — список email через запятую, которым сразу выдаётся роль admin.
 - `ADMIN_TELEGRAM_IDS` — список Telegram ID через запятую для роли admin.
 - `INVITE_TTL_DAYS` — срок действия инвайта в днях (по умолчанию 7).
+- `APP_BASE_URL` — базовый URL приложения для ссылок из Telegram (например, https://jornual.vercel.app).
 - `TELEGRAM_BOT_TOKEN` — токен Telegram-бота.
 - `TELEGRAM_BOT_USERNAME` — username бота без @.
 - `TELEGRAM_WEBHOOK_SECRET` — секрет для URL вебхука (используется в пути).
 - `TELEGRAM_TOKEN_TTL_MINUTES` — время жизни ссылки подтверждения в минутах (по умолчанию 15).
 - `TELEGRAM_LOGIN_TTL_SECONDS` — время жизни подписи Telegram‑логина (по умолчанию 600 сек).
+- `TELEGRAM_LOGIN_TOKEN_TTL_MINUTES` — время жизни ссылки входа из бота (по умолчанию 10 мин).
 
 ## Telegram-подтверждение
 
@@ -52,8 +54,8 @@ https://api.telegram.org/bot<token>/setWebhook?url=https://<domain>/telegram/web
 
 4) В Supabase Auth отключите подтверждение email, чтобы авторизация не зависела от писем.
 
-Также доступен вход через Telegram без почты — кнопка появляется на странице логина, если заполнены `TELEGRAM_BOT_TOKEN` и `TELEGRAM_BOT_USERNAME`.
-Для виджета нужно указать домен бота в @BotFather командой `/setdomain`.
+Также доступен вход через Telegram без почты — бот выдаёт ссылку для входа.
+Для корректных ссылок укажите `APP_BASE_URL`.
 
 ## Деплой на Vercel
 

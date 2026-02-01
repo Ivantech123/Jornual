@@ -668,19 +668,6 @@ textarea:focus {
   justify-content: flex-start;
 }
 
-.telegram-student {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transform: translateY(-6px);
-  transition: max-height 0.35s ease, opacity 0.35s ease, transform 0.35s ease;
-}
-
-.telegram-login.is-student .telegram-student {
-  max-height: 90px;
-  opacity: 1;
-  transform: translateY(0);
-}
 
 .telegram-card {
   display: grid;

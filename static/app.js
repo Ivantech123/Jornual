@@ -229,59 +229,6 @@
 (() => {
   const telegramBlock = document.querySelector("[data-telegram-block]");
   if (!telegramBlock) return;
-
-  const roleInputs = telegramBlock.querySelectorAll("[name='telegram_role']");
-  const studentField = telegramBlock.querySelector("[name='telegram_student_id']");
-  const status = document.querySelector("[data-auth-status]");
-
-  const setStatus = (message, isError = false) => {
-    if (!status) return;
-    status.textContent = message;
-    status.style.color = isError ? "#8d2a14" : "";
-  };
-
-  const updateTelegramRole = () => {
-    const role = telegramBlock.querySelector("[name='telegram_role']:checked")?.value || "teacher";
-    telegramBlock.classList.toggle("is-student", role === "student");
-  };
-
-  roleInputs.forEach((input) => {
-    input.addEventListener("change", updateTelegramRole);
-  });
-  updateTelegramRole();
-
-  window.onTelegramAuth = async (user) => {
-    const role = telegramBlock.querySelector("[name='telegram_role']:checked")?.value || "teacher";
-    const studentId = (studentField && studentField.value.trim()) || "";
-    setStatus("Проверяем Telegram...");
-    try {
-      const response = await fetch("/auth/telegram", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user,
-          requested_role: role,
-          student_id: studentId,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (payload.error === "invalid_signature") {
-          setStatus("Не удалось подтвердить Telegram. Попробуйте ещё раз.", true);
-          return;
-        }
-        if (payload.error === "telegram_disabled") {
-          setStatus("Telegram‑вход недоступен.", true);
-          return;
-        }
-        setStatus("Не удалось войти через Telegram.", true);
-        return;
-      }
-      window.location.href = payload.redirect || "/";
-    } catch (error) {
-      setStatus("Не удалось войти через Telegram.", true);
-    }
-  };
 })();
 
 (() => {

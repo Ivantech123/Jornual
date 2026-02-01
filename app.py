@@ -43,6 +43,10 @@ app.config["TELEGRAM_BOT_USERNAME"] = os.environ.get("TELEGRAM_BOT_USERNAME", ""
 app.config["TELEGRAM_WEBHOOK_SECRET"] = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
 app.config["TELEGRAM_TOKEN_TTL_MINUTES"] = int(os.environ.get("TELEGRAM_TOKEN_TTL_MINUTES", "15"))
 app.config["TELEGRAM_LOGIN_TTL_SECONDS"] = int(os.environ.get("TELEGRAM_LOGIN_TTL_SECONDS", "600"))
+app.config["TELEGRAM_LOGIN_TOKEN_TTL_MINUTES"] = int(
+    os.environ.get("TELEGRAM_LOGIN_TOKEN_TTL_MINUTES", "10")
+)
+app.config["APP_BASE_URL"] = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
 
 ADMIN_EMAILS = {
     value.strip().lower()
@@ -243,6 +247,18 @@ def ensure_schema() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_telegram_links_expires
             ON telegram_links(expires_at);
+
+        CREATE TABLE IF NOT EXISTS telegram_login_links (
+            token TEXT PRIMARY KEY,
+            telegram_id TEXT NOT NULL,
+            telegram_username TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_login_links_expires
+            ON telegram_login_links(expires_at);
         """
         with conn:
             with conn.cursor() as cur:
@@ -322,6 +338,18 @@ def ensure_schema() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_telegram_links_expires
             ON telegram_links(expires_at);
+
+        CREATE TABLE IF NOT EXISTS telegram_login_links (
+            token TEXT PRIMARY KEY,
+            telegram_id TEXT NOT NULL,
+            telegram_username TEXT,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_login_links_expires
+            ON telegram_login_links(expires_at);
         """
     )
     ensure_sqlite_columns(
@@ -699,6 +727,40 @@ def verify_telegram_login_payload(user: Dict[str, Any]) -> bool:
     return hmac.compare_digest(expected, provided)
 
 
+def create_telegram_login_token(telegram_id: str, username: str | None = None) -> str:
+    token = secrets.token_urlsafe(16)
+    now = now_iso()
+    ttl_minutes = app.config.get("TELEGRAM_LOGIN_TOKEN_TTL_MINUTES", 10)
+    expires_at = (datetime.utcnow() + timedelta(minutes=ttl_minutes)).replace(microsecond=0).isoformat() + "Z"
+    db_execute(
+        """
+        INSERT INTO telegram_login_links (token, telegram_id, telegram_username, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (token, telegram_id, (username or "").strip() or None, now, expires_at),
+    )
+    return token
+
+
+def verify_telegram_login_token(token: str) -> Dict[str, Any] | None:
+    row = db_fetchone(
+        """
+        SELECT token, telegram_id, telegram_username, expires_at, used_at
+        FROM telegram_login_links
+        WHERE token = ?
+        """,
+        (token,),
+    )
+    if not row:
+        return None
+    if row.get("used_at"):
+        return None
+    expires_at = row.get("expires_at")
+    if expires_at and expires_at < now_iso():
+        return None
+    return row
+
+
 def get_active_telegram_token(user_id: str) -> str | None:
     row = db_fetchone(
         """
@@ -989,6 +1051,50 @@ def auth_telegram() -> tuple[Dict[str, Any], int]:
     return jsonify({"ok": True, "redirect": redirect_url}), 200
 
 
+@app.get("/tg-login/<token>")
+def telegram_login_link(token: str) -> str:
+    row = verify_telegram_login_token(token)
+    if not row:
+        flash("Ссылка недействительна или устарела.", "error")
+        return redirect(url_for("login"))
+
+    now = now_iso()
+    telegram_id = str(row.get("telegram_id") or "").strip()
+    telegram_username = (row.get("telegram_username") or "").strip()
+    if not telegram_id:
+        flash("Не удалось определить Telegram ID.", "error")
+        return redirect(url_for("login"))
+
+    user_key = f"tg:{telegram_id}"
+    email_label = f"@{telegram_username}" if telegram_username else f"telegram:{telegram_id}"
+    state = upsert_user(user_key, email_label, "teacher", None)
+    role = state["role"]
+    if telegram_id in ADMIN_TELEGRAM_IDS:
+        role = "admin"
+        db_execute("UPDATE users SET role = 'admin' WHERE id = ?", (user_key,))
+
+    db_execute(
+        "UPDATE users SET telegram_id = ?, telegram_username = ?, telegram_verified_at = ? WHERE id = ?",
+        (telegram_id, telegram_username or None, now, user_key),
+    )
+    db_execute(
+        "UPDATE telegram_login_links SET used_at = ? WHERE token = ?",
+        (now, token),
+    )
+
+    session["user_id"] = user_key
+    session["email"] = email_label
+    session["role"] = role
+    session["telegram_verified"] = True
+    session.permanent = True
+
+    if role == "admin":
+        return redirect(url_for("index"))
+    if role == "student":
+        return redirect(url_for("student_portal"))
+    return redirect(url_for("pending"))
+
+
 @app.get("/logout")
 def logout() -> str:
     session.clear()
@@ -1157,19 +1263,30 @@ def telegram_webhook(secret: str) -> tuple[Dict[str, Any], int]:
         parts = text.split(maxsplit=1)
         if len(parts) > 1:
             token = parts[1].strip()
-        result = verify_telegram_token(token, chat_id, username)
-        if result == "ok":
-            send_telegram_message(chat_id, "Готово! Аккаунт подтверждён. Можно вернуться на сайт.")
-        elif result == "expired":
-            send_telegram_message(chat_id, "Ссылка устарела. Вернитесь на сайт и получите новую.")
-        elif result == "used":
-            send_telegram_message(chat_id, "Эта ссылка уже использована. Проверьте статус на сайте.")
-        elif result == "invalid":
-            send_telegram_message(chat_id, "Не смог найти ссылку. Откройте ссылку с сайта заново.")
+        if token:
+            result = verify_telegram_token(token, chat_id, username)
+            if result == "ok":
+                send_telegram_message(chat_id, "Готово! Аккаунт подтверждён. Можно вернуться на сайт.")
+            elif result == "expired":
+                send_telegram_message(chat_id, "Ссылка устарела. Вернитесь на сайт и получите новую.")
+            elif result == "used":
+                send_telegram_message(chat_id, "Эта ссылка уже использована. Проверьте статус на сайте.")
+            elif result == "invalid":
+                send_telegram_message(chat_id, "Не смог найти ссылку. Откройте ссылку с сайта заново.")
+            else:
+                send_telegram_message(chat_id, "Нужна ссылка с сайта. Откройте её и нажмите Start.")
         else:
-            send_telegram_message(chat_id, "Нужна ссылка с сайта. Откройте её и нажмите Start.")
+            login_token = create_telegram_login_token(str(chat_id), username)
+            base_url = app.config.get("APP_BASE_URL") or request.url_root.rstrip("/")
+            login_link = f"{base_url}/tg-login/{login_token}"
+            send_telegram_message(chat_id, f"Вход в журнал: {login_link}")
+    elif text.startswith("/login"):
+        login_token = create_telegram_login_token(str(chat_id), username)
+        base_url = app.config.get("APP_BASE_URL") or request.url_root.rstrip("/")
+        login_link = f"{base_url}/tg-login/{login_token}"
+        send_telegram_message(chat_id, f"Вход в журнал: {login_link}")
     else:
-        send_telegram_message(chat_id, "Чтобы подтвердить аккаунт, откройте ссылку с сайта и нажмите Start.")
+        send_telegram_message(chat_id, "Напишите /start или /login, чтобы получить ссылку для входа.")
 
     return jsonify({"ok": True}), 200
 
