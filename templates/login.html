@@ -20,6 +20,23 @@
     {% else %}
       <form class="form-grid auth-form" data-auth-form novalidate>
         <input type="hidden" name="action" value="login">
+        <div class="only-signup">
+          <span class="muted">Кто вы?</span>
+          <div class="segmented auth-role">
+            <label class="segment">
+              <input type="radio" name="account_role" value="teacher" checked>
+              <span>Я учитель</span>
+            </label>
+            <label class="segment">
+              <input type="radio" name="account_role" value="student">
+              <span>Я ученик</span>
+            </label>
+          </div>
+        </div>
+        <label class="only-student">
+          <span>ID ученика (если есть)</span>
+          <input type="text" name="student_id" placeholder="S001">
+        </label>
         <label>
           <span>Email</span>
           <input type="email" name="email" placeholder="teacher@mail.com" required>

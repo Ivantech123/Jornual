@@ -3,7 +3,11 @@
 {% block content %}
 <section class="student-hero">
   <div class="student-title">
-    <a class="ghost-link" href="{{ url_for('index') }}">← Назад к списку</a>
+    {% if is_admin %}
+      <a class="ghost-link" href="{{ url_for('index') }}">← Назад к списку</a>
+    {% else %}
+      <span class="muted">Личный кабинет ученика</span>
+    {% endif %}
     <h1>{{ student.name }}</h1>
     <p class="muted">ID: {{ student.student_id }}</p>
   </div>
@@ -21,57 +25,59 @@
   </div>
 </section>
 
-<section class="section split">
-  <div class="panel">
-    <h2>Добавить оценку</h2>
-    <form class="form-grid" action="{{ url_for('add_grade', student_id=student.student_id) }}" method="post">
-      <label>
-        <span>Предмет</span>
-        <input name="subject" placeholder="Математика" required>
-      </label>
-      <label>
-        <span>Оценка</span>
-        <input name="grade" placeholder="5" required>
-      </label>
-      <label>
-        <span>Дата</span>
-        <input type="date" name="date" value="{{ today }}" required>
-      </label>
-      <label>
-        <span>Примечание</span>
-        <input name="note" placeholder="Контрольная">
-      </label>
-      <button type="submit" class="primary">Сохранить оценку</button>
-    </form>
-  </div>
-  <div class="panel">
-    <h2>Отметить посещаемость</h2>
-    <form class="form-grid" action="{{ url_for('add_attendance', student_id=student.student_id) }}" method="post">
-      <label>
-        <span>Дата</span>
-        <input type="date" name="date" value="{{ today }}" required>
-      </label>
-      <label>
-        <span>Статус</span>
-        <div class="segmented">
-          <label class="segment">
-            <input type="radio" name="present" value="1" checked>
-            <span>Присутствовал</span>
-          </label>
-          <label class="segment">
-            <input type="radio" name="present" value="0">
-            <span>Отсутствовал</span>
-          </label>
-        </div>
-      </label>
-      <label>
-        <span>Примечание</span>
-        <input name="note" placeholder="Болел">
-      </label>
-      <button type="submit" class="primary">Отметить</button>
-    </form>
-  </div>
-</section>
+{% if is_admin %}
+  <section class="section split">
+    <div class="panel">
+      <h2>Добавить оценку</h2>
+      <form class="form-grid" action="{{ url_for('add_grade', student_id=student.student_id) }}" method="post">
+        <label>
+          <span>Предмет</span>
+          <input name="subject" placeholder="Математика" required>
+        </label>
+        <label>
+          <span>Оценка</span>
+          <input name="grade" placeholder="5" required>
+        </label>
+        <label>
+          <span>Дата</span>
+          <input type="date" name="date" value="{{ today }}" required>
+        </label>
+        <label>
+          <span>Примечание</span>
+          <input name="note" placeholder="Контрольная">
+        </label>
+        <button type="submit" class="primary">Сохранить оценку</button>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Отметить посещаемость</h2>
+      <form class="form-grid" action="{{ url_for('add_attendance', student_id=student.student_id) }}" method="post">
+        <label>
+          <span>Дата</span>
+          <input type="date" name="date" value="{{ today }}" required>
+        </label>
+        <label>
+          <span>Статус</span>
+          <div class="segmented">
+            <label class="segment">
+              <input type="radio" name="present" value="1" checked>
+              <span>Присутствовал</span>
+            </label>
+            <label class="segment">
+              <input type="radio" name="present" value="0">
+              <span>Отсутствовал</span>
+            </label>
+          </div>
+        </label>
+        <label>
+          <span>Примечание</span>
+          <input name="note" placeholder="Болел">
+        </label>
+        <button type="submit" class="primary">Отметить</button>
+      </form>
+    </div>
+  </section>
+{% endif %}
 
 <section class="section">
   <div class="panel">

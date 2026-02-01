@@ -598,6 +598,24 @@ textarea:focus {
   transform: translateY(0);
 }
 
+.auth-role {
+  margin-top: 8px;
+}
+
+.only-student {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-6px);
+  transition: max-height 0.35s ease, opacity 0.35s ease, transform 0.35s ease;
+}
+
+.auth-form.is-signup.is-student .only-student {
+  max-height: 90px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .auth-actions {
   display: flex;
   gap: 12px;

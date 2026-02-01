@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-card">
+    <h1>Кабинет ученика</h1>
+    {% if current_user %}
+      <p class="muted">Вы вошли как {{ current_user.email }}.</p>
+    {% endif %}
+    {% if student_id %}
+      <p>Мы пока не нашли ученика с ID {{ student_id }}.</p>
+      <p class="muted">Проверьте ID или попросите учителя привязать аккаунт.</p>
+    {% else %}
+      <p>Профиль ученика ещё не привязан к вашему аккаунту.</p>
+      <p class="muted">Сообщите учителю ваш email или ID ученика, чтобы связать доступ.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

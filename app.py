@@ -30,6 +30,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("JOURNAL_SECRET", "dev-key-change-me")
 app.config["SUPABASE_URL"] = os.environ.get("SUPABASE_URL", "").strip()
 app.config["SUPABASE_ANON_KEY"] = os.environ.get("SUPABASE_ANON_KEY", "").strip()
+app.config["SUPABASE_SERVICE_ROLE_KEY"] = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 app.config["SUPABASE_DB_URL"] = os.environ.get("SUPABASE_DB_URL", "").strip()
 app.config["SUPABASE_POOLER_URL"] = os.environ.get("SUPABASE_POOLER_URL", "").strip()
 app.config["DATABASE_URL"] = os.environ.get("DATABASE_URL", "").strip()
@@ -196,6 +197,7 @@ def ensure_schema() -> None:
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
+            student_id TEXT,
             created_at TEXT NOT NULL,
             last_seen TEXT NOT NULL
         );
@@ -203,6 +205,7 @@ def ensure_schema() -> None:
         ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username TEXT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_verified_at TEXT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS student_id TEXT;
 
         CREATE INDEX IF NOT EXISTS idx_users_role
             ON users(role);
@@ -278,6 +281,7 @@ def ensure_schema() -> None:
             id TEXT PRIMARY KEY,
             email TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
+            student_id TEXT,
             created_at TEXT NOT NULL,
             last_seen TEXT NOT NULL
         );
@@ -318,6 +322,7 @@ def ensure_schema() -> None:
             ("telegram_id", "TEXT"),
             ("telegram_username", "TEXT"),
             ("telegram_verified_at", "TEXT"),
+            ("student_id", "TEXT"),
         ],
     )
     conn.commit()
@@ -431,27 +436,101 @@ def fetch_supabase_user(access_token: str) -> Dict[str, Any] | None:
         return None
 
 
-def upsert_user(user_id: str, email: str) -> Dict[str, Any]:
+def create_supabase_user(email: str, password: str) -> tuple[bool, str]:
+    supabase_url = app.config["SUPABASE_URL"]
+    service_key = app.config["SUPABASE_SERVICE_ROLE_KEY"]
+    if not supabase_url or not service_key:
+        return False, "admin_signup_disabled"
+    url = f"{supabase_url.rstrip('/')}/auth/v1/admin/users"
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {service_key}",
+                "apikey": service_key,
+            },
+            json={
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+            },
+            timeout=8,
+        )
+    except requests.RequestException:
+        return False, "network"
+    if response.status_code in {200, 201}:
+        return True, "ok"
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    error = str(payload.get("msg") or payload.get("error") or "").lower()
+    if "already" in error or "exists" in error or "registered" in error:
+        return False, "user_exists"
+    return False, "failed"
+
+
+def normalize_role(value: str | None) -> str | None:
+    value = (value or "").strip().lower()
+    if value in {"student", "teacher"}:
+        return value
+    return None
+
+
+def normalize_student_id(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value if value else None
+
+
+def upsert_user(
+    user_id: str,
+    email: str,
+    requested_role: str | None = None,
+    requested_student_id: str | None = None,
+) -> Dict[str, Any]:
     now = now_iso()
+    email_lower = email.lower()
+    requested_role = normalize_role(requested_role)
+    requested_student_id = normalize_student_id(requested_student_id)
     row = db_fetchone(
-        "SELECT role, telegram_verified_at FROM users WHERE id = ?",
+        "SELECT role, telegram_verified_at, student_id FROM users WHERE id = ?",
         (user_id,),
     )
     if row:
         role = row["role"]
+        student_id = row.get("student_id")
         telegram_verified_at = row.get("telegram_verified_at")
-        db_execute(
-            "UPDATE users SET email = ?, last_seen = ? WHERE id = ?",
-            (email, now, user_id),
-        )
+        if email_lower in ADMIN_EMAILS and role != "admin":
+            role = "admin"
+        updates = ["email = ?", "last_seen = ?"]
+        params: list[Any] = [email, now]
+        if role != row["role"]:
+            updates.append("role = ?")
+            params.append(role)
+        if requested_role == "student" and not student_id and requested_student_id:
+            updates.append("student_id = ?")
+            params.append(requested_student_id)
+            student_id = requested_student_id
+        params.append(user_id)
+        db_execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", tuple(params))
     else:
-        role = "admin" if email.lower() in ADMIN_EMAILS else "user"
+        if email_lower in ADMIN_EMAILS:
+            role = "admin"
+        elif requested_role:
+            role = requested_role
+        else:
+            role = "teacher"
         telegram_verified_at = None
+        student_id = requested_student_id if role == "student" else None
         db_execute(
-            "INSERT INTO users (id, email, role, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-            (user_id, email, role, now, now),
+            "INSERT INTO users (id, email, role, student_id, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, email, role, student_id, now, now),
         )
-    return {"role": role, "telegram_verified": bool(telegram_verified_at)}
+    return {
+        "role": role,
+        "telegram_verified": bool(telegram_verified_at),
+        "student_id": student_id,
+    }
 
 
 def list_users() -> List[Dict[str, Any]]:
@@ -511,6 +590,8 @@ def admin_required(view):
         hydrate_session_user()
         if not session.get("telegram_verified"):
             return redirect(url_for("telegram_link"))
+        if session.get("role") == "student":
+            return redirect(url_for("student_portal"))
         if session.get("role") != "admin":
             return redirect(url_for("pending"))
         return view(*args, **kwargs)
@@ -640,15 +721,20 @@ def hydrate_session_user() -> None:
     user_id = session.get("user_id")
     if not user_id:
         return
-    if "role" in session and "telegram_verified" in session:
+    if "role" in session and "telegram_verified" in session and session.get("role") == "admin":
         return
     row = db_fetchone(
-        "SELECT role, telegram_verified_at FROM users WHERE id = ?",
+        "SELECT role, telegram_verified_at, email FROM users WHERE id = ?",
         (user_id,),
     )
     if not row:
         return
-    session["role"] = row.get("role")
+    role = row.get("role")
+    email = (row.get("email") or "").lower()
+    if email in ADMIN_EMAILS and role != "admin":
+        role = "admin"
+        db_execute("UPDATE users SET role = 'admin' WHERE id = ?", (user_id,))
+    session["role"] = role
     session["telegram_verified"] = bool(row.get("telegram_verified_at"))
 
 
@@ -756,6 +842,8 @@ def login() -> str:
 def auth_session() -> tuple[str, int] | tuple[Dict[str, Any], int]:
     payload = request.get_json(silent=True) or {}
     access_token = (payload.get("access_token") or "").strip()
+    requested_role = (payload.get("requested_role") or "").strip()
+    requested_student_id = (payload.get("student_id") or "").strip()
     if not access_token:
         return jsonify({"error": "missing_token"}), 400
 
@@ -764,7 +852,7 @@ def auth_session() -> tuple[str, int] | tuple[Dict[str, Any], int]:
         return jsonify({"error": "invalid_token"}), 401
 
     email = user.get("email") or ""
-    state = upsert_user(user["id"], email)
+    state = upsert_user(user["id"], email, requested_role, requested_student_id)
     role = state["role"]
     telegram_verified = state["telegram_verified"]
     session["user_id"] = user["id"]
@@ -775,8 +863,33 @@ def auth_session() -> tuple[str, int] | tuple[Dict[str, Any], int]:
     if not telegram_verified:
         redirect_url = url_for("telegram_link")
     else:
-        redirect_url = url_for("index") if role == "admin" else url_for("pending")
+        if role == "admin":
+            redirect_url = url_for("index")
+        elif role == "student":
+            redirect_url = url_for("student_portal")
+        else:
+            redirect_url = url_for("pending")
     return jsonify({"ok": True, "role": role, "redirect": redirect_url}), 200
+
+
+@app.post("/auth/signup")
+def auth_signup() -> tuple[Dict[str, Any], int]:
+    payload = request.get_json(silent=True) or {}
+    email = (payload.get("email") or "").strip()
+    password = (payload.get("password") or "").strip()
+    if not email or not password:
+        return jsonify({"error": "missing_fields"}), 400
+
+    ok, code = create_supabase_user(email, password)
+    if ok:
+        return jsonify({"ok": True}), 200
+    if code == "admin_signup_disabled":
+        return jsonify({"error": "admin_signup_disabled"}), 400
+    if code == "user_exists":
+        return jsonify({"error": "user_exists"}), 409
+    if code == "network":
+        return jsonify({"error": "network"}), 502
+    return jsonify({"error": "failed"}), 400
 
 
 @app.get("/logout")
@@ -789,6 +902,8 @@ def logout() -> str:
 @login_required
 @telegram_required
 def pending() -> str:
+    if session.get("role") == "student":
+        return redirect(url_for("student_portal"))
     return render_template("pending.html", today=date.today().isoformat())
 
 
@@ -804,7 +919,12 @@ def telegram_link() -> str:
     )
     if row and row.get("telegram_verified_at"):
         session["telegram_verified"] = True
-        redirect_url = url_for("index") if session.get("role") == "admin" else url_for("pending")
+        if session.get("role") == "admin":
+            redirect_url = url_for("index")
+        elif session.get("role") == "student":
+            redirect_url = url_for("student_portal")
+        else:
+            redirect_url = url_for("pending")
         return redirect(redirect_url)
 
     bot_username = app.config.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
@@ -818,6 +938,80 @@ def telegram_link() -> str:
         bot_username=bot_username,
         deep_link=deep_link,
         token_ttl=app.config.get("TELEGRAM_TOKEN_TTL_MINUTES", 15),
+    )
+
+
+@app.get("/student")
+@login_required
+@telegram_required
+def student_portal() -> str:
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+    row = db_fetchone("SELECT role, student_id FROM users WHERE id = ?", (user_id,))
+    if not row:
+        return redirect(url_for("login"))
+    if row.get("role") != "student":
+        if row.get("role") == "admin":
+            return redirect(url_for("index"))
+        return redirect(url_for("pending"))
+
+    student_id = row.get("student_id")
+    if not student_id:
+        return render_template(
+            "student_portal.html",
+            today=date.today().isoformat(),
+            student=None,
+            student_id=None,
+        )
+
+    student = get_student(student_id)
+    if not student:
+        return render_template(
+            "student_portal.html",
+            today=date.today().isoformat(),
+            student=None,
+            student_id=student_id,
+        )
+
+    grades = db_fetchall(
+        """
+        SELECT id, subject, grade, date, note
+        FROM grades
+        WHERE student_id = ?
+        ORDER BY date DESC, id DESC
+        """,
+        (student_id,),
+    )
+    attendance = db_fetchall(
+        """
+        SELECT id, date, present, note
+        FROM attendance
+        WHERE student_id = ?
+        ORDER BY date DESC, id DESC
+        """,
+        (student_id,),
+    )
+    subjects = db_fetchall(
+        """
+        SELECT subject, ROUND(AVG(grade), 2) AS average, COUNT(*) AS count
+        FROM grades
+        WHERE student_id = ?
+        GROUP BY subject
+        ORDER BY subject
+        """,
+        (student_id,),
+    )
+    stats = get_student_stats(student_id)
+
+    return render_template(
+        "student.html",
+        student=student,
+        grades=grades,
+        attendance=attendance,
+        subjects=subjects,
+        stats=stats,
+        today=date.today().isoformat(),
     )
 
 
@@ -836,7 +1030,12 @@ def telegram_status() -> tuple[Dict[str, Any], int]:
         session["telegram_verified"] = True
         if row.get("role"):
             session["role"] = row["role"]
-        redirect_url = url_for("index") if session.get("role") == "admin" else url_for("pending")
+        if session.get("role") == "admin":
+            redirect_url = url_for("index")
+        elif session.get("role") == "student":
+            redirect_url = url_for("student_portal")
+        else:
+            redirect_url = url_for("pending")
         return jsonify({"verified": True, "redirect": redirect_url}), 200
     return jsonify({"verified": False}), 200
 
@@ -882,6 +1081,9 @@ def telegram_webhook(secret: str) -> tuple[Dict[str, Any], int]:
 @login_required
 @telegram_required
 def accept_invite(token: str) -> str:
+    if session.get("role") == "student":
+        flash("Инвайты доступны только для учителей.", "error")
+        return redirect(url_for("student_portal"))
     row = db_fetchone(
         "SELECT token, expires_at, used_at FROM admin_invites WHERE token = ?",
         (token,),

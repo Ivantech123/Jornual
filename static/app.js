@@ -45,7 +45,20 @@
   const submit = authForm.querySelector("[data-auth-submit]");
   const tabs = document.querySelectorAll("[data-auth-mode]");
   const signupOnly = authForm.querySelectorAll(".only-signup");
+  const roleInputs = authForm.querySelectorAll("[name='account_role']");
+  const studentIdField = authForm.querySelector("[name='student_id']");
   const card = document.querySelector("[data-auth-card]");
+
+  const updateRoleView = () => {
+    const role = authForm.querySelector("[name='account_role']:checked")?.value || "teacher";
+    authForm.classList.toggle("is-student", role === "student");
+    if (note) {
+      note.textContent =
+        role === "student"
+          ? "После регистрации подтвердите доступ через Telegram. Профиль привяжет учитель."
+          : "После регистрации подтвердите доступ через Telegram.";
+    }
+  };
 
   const setMode = (mode) => {
     const isSignup = mode === "signup";
@@ -59,7 +72,6 @@
         : "Авторизация для учителей. Доступ по инвайту и подтверждению в Telegram.";
     }
     if (note) {
-      note.textContent = "После регистрации подтвердите доступ через Telegram.";
       note.style.display = isSignup ? "block" : "none";
     }
     signupOnly.forEach((field) => {
@@ -73,12 +85,17 @@
       void card.offsetWidth;
       card.classList.add("is-switching");
     }
+    updateRoleView();
   };
 
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
       setMode(tab.dataset.authMode || "login");
     });
+  });
+
+  roleInputs.forEach((input) => {
+    input.addEventListener("change", updateRoleView);
   });
 
   setMode((actionField && actionField.value) || "login");
@@ -88,11 +105,11 @@
     status.style.color = isError ? "#8d2a14" : "";
   };
 
-  const syncSession = async (session) => {
+  const syncSession = async (session, extra = {}) => {
     const response = await fetch("/auth/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ access_token: session.access_token }),
+      body: JSON.stringify({ access_token: session.access_token, ...extra }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -132,22 +149,69 @@
         return;
       }
       if (action === "signup") {
-        const { data, error } = await client.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/login`,
-          },
-        });
+        setStatus("Создаём аккаунт...");
+        let adminSignup = false;
+        const selectedRole = authForm.querySelector("[name='account_role']:checked")?.value || "teacher";
+        const studentId = (studentIdField && studentIdField.value.trim()) || "";
+        try {
+          const response = await fetch("/auth/signup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+          if (response.ok) {
+            adminSignup = true;
+          } else {
+            const payload = await response.json().catch(() => ({}));
+            if (payload.error === "admin_signup_disabled") {
+              adminSignup = false;
+            } else if (payload.error === "user_exists") {
+              adminSignup = true;
+            } else if (payload.error === "network") {
+              setStatus("Сервер регистрации недоступен. Попробуйте ещё раз.", true);
+              return;
+            } else {
+              setStatus("Не удалось создать аккаунт. Проверьте данные.", true);
+              return;
+            }
+          }
+        } catch (error) {
+          setStatus("Не удалось создать аккаунт. Попробуйте позже.", true);
+          return;
+        }
+
+        if (!adminSignup) {
+          const { data, error } = await client.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/login`,
+            },
+          });
+          if (error) {
+            setStatus(error.message, true);
+            return;
+          }
+          if (!data.session) {
+            setStatus("Регистрация создана. Подтвердите доступ в Telegram или проверьте настройки подтверждения email.");
+            return;
+          }
+          await syncSession(data.session, {
+            requested_role: selectedRole,
+            student_id: studentId,
+          });
+          return;
+        }
+
+        const { data, error } = await client.auth.signInWithPassword({ email, password });
         if (error) {
           setStatus(error.message, true);
           return;
         }
-        if (!data.session) {
-          setStatus("Регистрация создана. Подтвердите доступ в Telegram или проверьте настройки подтверждения email.");
-          return;
-        }
-        await syncSession(data.session);
+        await syncSession(data.session, {
+          requested_role: selectedRole,
+          student_id: studentId,
+        });
       } else {
         const { data, error } = await client.auth.signInWithPassword({ email, password });
         if (error) {
