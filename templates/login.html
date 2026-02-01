@@ -15,7 +15,7 @@
 
     {% if not supabase_url or not supabase_anon_key %}
       <div class="flash flash-error">
-        Авторизация не настроена. Проверьте переменные окружения для входа.
+        Email‑вход не настроен. Проверьте переменные окружения для Supabase.
       </div>
     {% else %}
       <form class="form-grid auth-form" data-auth-form novalidate>
@@ -55,6 +55,37 @@
       </form>
       <p class="auth-note" data-auth-note>После регистрации подтвердите доступ через Telegram.</p>
       <p class="auth-note" data-auth-status></p>
+    {% endif %}
+
+    {% if telegram_login_enabled %}
+      <div class="auth-divider"><span>или</span></div>
+      <div class="telegram-login" data-telegram-block>
+        <p class="muted">Вход через Telegram без почты.</p>
+        <div class="segmented auth-role telegram-role">
+          <label class="segment">
+            <input type="radio" name="telegram_role" value="teacher" checked>
+            <span>Я учитель</span>
+          </label>
+          <label class="segment">
+            <input type="radio" name="telegram_role" value="student">
+            <span>Я ученик</span>
+          </label>
+        </div>
+        <label class="telegram-student">
+          <span>ID ученика (если есть)</span>
+          <input type="text" name="telegram_student_id" placeholder="S001">
+        </label>
+        <div class="telegram-widget">
+          <script
+            async
+            src="https://telegram.org/js/telegram-widget.js?22"
+            data-telegram-login="{{ telegram_bot_username }}"
+            data-size="large"
+            data-userpic="false"
+            data-onauth="onTelegramAuth(user)">
+          </script>
+        </div>
+      </div>
     {% endif %}
   </div>
 </section>

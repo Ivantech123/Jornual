@@ -638,6 +638,50 @@ textarea:focus {
   font-size: 13px;
 }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--stroke);
+}
+
+.telegram-login {
+  display: grid;
+  gap: 12px;
+}
+
+.telegram-widget {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.telegram-student {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-6px);
+  transition: max-height 0.35s ease, opacity 0.35s ease, transform 0.35s ease;
+}
+
+.telegram-login.is-student .telegram-student {
+  max-height: 90px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .telegram-card {
   display: grid;
   gap: 14px;

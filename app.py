@@ -1,10 +1,13 @@
 ﻿from __future__ import annotations
 
+import hashlib
+import hmac
 import math
 import os
 import secrets
 import socket
 import sqlite3
+import time
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -39,10 +42,16 @@ app.config["TELEGRAM_BOT_TOKEN"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").stri
 app.config["TELEGRAM_BOT_USERNAME"] = os.environ.get("TELEGRAM_BOT_USERNAME", "").strip()
 app.config["TELEGRAM_WEBHOOK_SECRET"] = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
 app.config["TELEGRAM_TOKEN_TTL_MINUTES"] = int(os.environ.get("TELEGRAM_TOKEN_TTL_MINUTES", "15"))
+app.config["TELEGRAM_LOGIN_TTL_SECONDS"] = int(os.environ.get("TELEGRAM_LOGIN_TTL_SECONDS", "600"))
 
 ADMIN_EMAILS = {
     value.strip().lower()
     for value in os.environ.get("ADMIN_EMAILS", "").split(",")
+    if value.strip()
+}
+ADMIN_TELEGRAM_IDS = {
+    value.strip()
+    for value in os.environ.get("ADMIN_TELEGRAM_IDS", "").split(",")
     if value.strip()
 }
 
@@ -610,8 +619,9 @@ def inject_globals() -> Dict[str, Any]:
         else None,
         "is_admin": session.get("role") == "admin",
         "telegram_enabled": telegram_enabled(),
+        "telegram_login_enabled": telegram_login_enabled(),
         "telegram_verified": session.get("telegram_verified"),
-        "telegram_bot_username": app.config["TELEGRAM_BOT_USERNAME"],
+        "telegram_bot_username": app.config["TELEGRAM_BOT_USERNAME"].strip().lstrip("@"),
         "supabase_url": app.config["SUPABASE_URL"],
         "supabase_anon_key": app.config["SUPABASE_ANON_KEY"],
     }
@@ -636,6 +646,13 @@ def telegram_enabled() -> bool:
     )
 
 
+def telegram_login_enabled() -> bool:
+    return bool(
+        app.config.get("TELEGRAM_BOT_TOKEN")
+        and app.config.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+    )
+
+
 def telegram_api_url(method: str) -> str:
     return f"https://api.telegram.org/bot{app.config['TELEGRAM_BOT_TOKEN']}/{method}"
 
@@ -652,6 +669,34 @@ def send_telegram_message(chat_id: str | int, text: str) -> bool:
     except requests.RequestException:
         return False
     return response.ok
+
+
+def verify_telegram_login_payload(user: Dict[str, Any]) -> bool:
+    token = app.config.get("TELEGRAM_BOT_TOKEN")
+    if not token or not user:
+        return False
+    try:
+        auth_date = int(user.get("auth_date") or 0)
+    except (TypeError, ValueError):
+        return False
+    now_ts = int(time.time())
+    ttl = int(app.config.get("TELEGRAM_LOGIN_TTL_SECONDS", 600))
+    if auth_date <= 0 or auth_date > now_ts + 60:
+        return False
+    if now_ts - auth_date > ttl:
+        return False
+
+    data: Dict[str, Any] = {}
+    for key, value in user.items():
+        if key == "hash" or value is None:
+            continue
+        data[key] = value
+
+    data_check_string = "\n".join(f"{key}={data[key]}" for key in sorted(data.keys()))
+    secret = hashlib.sha256(token.encode("utf-8")).digest()
+    expected = hmac.new(secret, data_check_string.encode("utf-8"), hashlib.sha256).hexdigest()
+    provided = str(user.get("hash") or "")
+    return hmac.compare_digest(expected, provided)
 
 
 def get_active_telegram_token(user_id: str) -> str | None:
@@ -890,6 +935,58 @@ def auth_signup() -> tuple[Dict[str, Any], int]:
     if code == "network":
         return jsonify({"error": "network"}), 502
     return jsonify({"error": "failed"}), 400
+
+
+@app.post("/auth/telegram")
+def auth_telegram() -> tuple[Dict[str, Any], int]:
+    if not telegram_login_enabled():
+        return jsonify({"error": "telegram_disabled"}), 400
+    payload = request.get_json(silent=True) or {}
+    user = payload.get("user") or {}
+    if not verify_telegram_login_payload(user):
+        return jsonify({"error": "invalid_signature"}), 401
+
+    telegram_id = str(user.get("id") or "").strip()
+    if not telegram_id:
+        return jsonify({"error": "invalid_user"}), 400
+
+    username = (user.get("username") or "").strip()
+    first_name = (user.get("first_name") or "").strip()
+    last_name = (user.get("last_name") or "").strip()
+    display_name = f"{first_name} {last_name}".strip()
+    if not display_name:
+        display_name = f"@{username}" if username else f"Telegram {telegram_id}"
+
+    requested_role = (payload.get("requested_role") or "").strip()
+    student_id = (payload.get("student_id") or "").strip()
+    email_label = f"@{username}" if username else f"telegram:{telegram_id}"
+    user_key = f"tg:{telegram_id}"
+
+    state = upsert_user(user_key, email_label, requested_role, student_id)
+    role = state["role"]
+    if telegram_id in ADMIN_TELEGRAM_IDS:
+        role = "admin"
+        db_execute("UPDATE users SET role = 'admin' WHERE id = ?", (user_key,))
+
+    now = now_iso()
+    db_execute(
+        "UPDATE users SET telegram_id = ?, telegram_username = ?, telegram_verified_at = ? WHERE id = ?",
+        (telegram_id, username or None, now, user_key),
+    )
+
+    session["user_id"] = user_key
+    session["email"] = display_name
+    session["role"] = role
+    session["telegram_verified"] = True
+    session.permanent = True
+
+    if role == "admin":
+        redirect_url = url_for("index")
+    elif role == "student":
+        redirect_url = url_for("student_portal")
+    else:
+        redirect_url = url_for("pending")
+    return jsonify({"ok": True, "redirect": redirect_url}), 200
 
 
 @app.get("/logout")
