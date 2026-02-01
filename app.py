@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 import requests
-from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
 
 try:
     from dotenv import load_dotenv
@@ -34,6 +34,10 @@ app.config["SUPABASE_DB_URL"] = os.environ.get("SUPABASE_DB_URL", "").strip()
 app.config["SUPABASE_POOLER_URL"] = os.environ.get("SUPABASE_POOLER_URL", "").strip()
 app.config["DATABASE_URL"] = os.environ.get("DATABASE_URL", "").strip()
 app.config["INVITE_TTL_DAYS"] = int(os.environ.get("INVITE_TTL_DAYS", "7"))
+app.config["TELEGRAM_BOT_TOKEN"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+app.config["TELEGRAM_BOT_USERNAME"] = os.environ.get("TELEGRAM_BOT_USERNAME", "").strip()
+app.config["TELEGRAM_WEBHOOK_SECRET"] = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "").strip()
+app.config["TELEGRAM_TOKEN_TTL_MINUTES"] = int(os.environ.get("TELEGRAM_TOKEN_TTL_MINUTES", "15"))
 
 ADMIN_EMAILS = {
     value.strip().lower()
@@ -101,6 +105,20 @@ def is_postgres() -> bool:
 
 def adapt_sql(sql: str) -> str:
     return sql.replace("?", "%s") if is_postgres() else sql
+
+
+def sqlite_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {row[1] for row in rows}
+
+
+def ensure_sqlite_columns(
+    conn: sqlite3.Connection, table: str, columns: list[tuple[str, str]]
+) -> None:
+    existing = sqlite_columns(conn, table)
+    for name, column_type in columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
 
 
 def configure_connection(conn: sqlite3.Connection) -> None:
@@ -182,6 +200,10 @@ def ensure_schema() -> None:
             last_seen TEXT NOT NULL
         );
 
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id TEXT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username TEXT;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_verified_at TEXT;
+
         CREATE INDEX IF NOT EXISTS idx_users_role
             ON users(role);
 
@@ -192,6 +214,23 @@ def ensure_schema() -> None:
             used_by TEXT,
             used_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS telegram_links (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            telegram_id TEXT,
+            telegram_username TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_links_user
+            ON telegram_links(user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_links_expires
+            ON telegram_links(expires_at);
         """
         with conn:
             with conn.cursor() as cur:
@@ -253,7 +292,33 @@ def ensure_schema() -> None:
             used_by TEXT,
             used_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS telegram_links (
+            token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            telegram_id TEXT,
+            telegram_username TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_links_user
+            ON telegram_links(user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_links_expires
+            ON telegram_links(expires_at);
         """
+    )
+    ensure_sqlite_columns(
+        conn,
+        "users",
+        [
+            ("telegram_id", "TEXT"),
+            ("telegram_username", "TEXT"),
+            ("telegram_verified_at", "TEXT"),
+        ],
     )
     conn.commit()
     conn.close()
@@ -366,22 +431,27 @@ def fetch_supabase_user(access_token: str) -> Dict[str, Any] | None:
         return None
 
 
-def upsert_user(user_id: str, email: str) -> str:
+def upsert_user(user_id: str, email: str) -> Dict[str, Any]:
     now = now_iso()
-    row = db_fetchone("SELECT role FROM users WHERE id = ?", (user_id,))
+    row = db_fetchone(
+        "SELECT role, telegram_verified_at FROM users WHERE id = ?",
+        (user_id,),
+    )
     if row:
         role = row["role"]
+        telegram_verified_at = row.get("telegram_verified_at")
         db_execute(
             "UPDATE users SET email = ?, last_seen = ? WHERE id = ?",
             (email, now, user_id),
         )
     else:
         role = "admin" if email.lower() in ADMIN_EMAILS else "user"
+        telegram_verified_at = None
         db_execute(
             "INSERT INTO users (id, email, role, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
             (user_id, email, role, now, now),
         )
-    return role
+    return {"role": role, "telegram_verified": bool(telegram_verified_at)}
 
 
 def list_users() -> List[Dict[str, Any]]:
@@ -417,6 +487,17 @@ def login_required(view):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             return redirect(url_for("login"))
+        hydrate_session_user()
+        return view(*args, **kwargs)
+
+    return wrapper
+
+
+def telegram_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not session.get("telegram_verified"):
+            return redirect(url_for("telegram_link"))
         return view(*args, **kwargs)
 
     return wrapper
@@ -427,6 +508,9 @@ def admin_required(view):
     def wrapper(*args, **kwargs):
         if not session.get("user_id"):
             return redirect(url_for("login"))
+        hydrate_session_user()
+        if not session.get("telegram_verified"):
+            return redirect(url_for("telegram_link"))
         if session.get("role") != "admin":
             return redirect(url_for("pending"))
         return view(*args, **kwargs)
@@ -444,6 +528,9 @@ def inject_globals() -> Dict[str, Any]:
         if session.get("user_id")
         else None,
         "is_admin": session.get("role") == "admin",
+        "telegram_enabled": telegram_enabled(),
+        "telegram_verified": session.get("telegram_verified"),
+        "telegram_bot_username": app.config["TELEGRAM_BOT_USERNAME"],
         "supabase_url": app.config["SUPABASE_URL"],
         "supabase_anon_key": app.config["SUPABASE_ANON_KEY"],
     }
@@ -459,6 +546,110 @@ def seed_students_if_empty() -> None:
         payload.append((student_id, name))
     db_executemany("INSERT INTO students (student_id, name) VALUES (?, ?)", payload)
 
+
+def telegram_enabled() -> bool:
+    return bool(
+        app.config.get("TELEGRAM_BOT_TOKEN")
+        and app.config.get("TELEGRAM_BOT_USERNAME")
+        and app.config.get("TELEGRAM_WEBHOOK_SECRET")
+    )
+
+
+def telegram_api_url(method: str) -> str:
+    return f"https://api.telegram.org/bot{app.config['TELEGRAM_BOT_TOKEN']}/{method}"
+
+
+def send_telegram_message(chat_id: str | int, text: str) -> bool:
+    if not app.config.get("TELEGRAM_BOT_TOKEN"):
+        return False
+    try:
+        response = requests.post(
+            telegram_api_url("sendMessage"),
+            json={"chat_id": chat_id, "text": text},
+            timeout=6,
+        )
+    except requests.RequestException:
+        return False
+    return response.ok
+
+
+def get_active_telegram_token(user_id: str) -> str | None:
+    row = db_fetchone(
+        """
+        SELECT token, expires_at
+        FROM telegram_links
+        WHERE user_id = ? AND used_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (user_id,),
+    )
+    if not row:
+        return None
+    expires_at = row.get("expires_at")
+    if expires_at and expires_at < now_iso():
+        return None
+    return row.get("token")
+
+
+def create_telegram_token(user_id: str) -> str:
+    token = secrets.token_urlsafe(16)
+    now = now_iso()
+    ttl_minutes = app.config.get("TELEGRAM_TOKEN_TTL_MINUTES", 15)
+    expires_at = (datetime.utcnow() + timedelta(minutes=ttl_minutes)).replace(microsecond=0).isoformat() + "Z"
+    db_execute(
+        "INSERT INTO telegram_links (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        (token, user_id, now, expires_at),
+    )
+    return token
+
+
+def verify_telegram_token(
+    token: str | None,
+    chat_id: str | int | None,
+    username: str | None,
+) -> str:
+    if not token:
+        return "missing"
+    row = db_fetchone(
+        "SELECT token, user_id, expires_at, used_at FROM telegram_links WHERE token = ?",
+        (token,),
+    )
+    if not row:
+        return "invalid"
+    if row.get("used_at"):
+        return "used"
+    expires_at = row.get("expires_at")
+    if expires_at and expires_at < now_iso():
+        return "expired"
+    now = now_iso()
+    telegram_id = str(chat_id) if chat_id is not None else None
+    telegram_username = (username or "").strip() or None
+    db_execute(
+        "UPDATE telegram_links SET used_at = ?, telegram_id = ?, telegram_username = ? WHERE token = ?",
+        (now, telegram_id, telegram_username, token),
+    )
+    db_execute(
+        "UPDATE users SET telegram_id = ?, telegram_username = ?, telegram_verified_at = ? WHERE id = ?",
+        (telegram_id, telegram_username, now, row["user_id"]),
+    )
+    return "ok"
+
+
+def hydrate_session_user() -> None:
+    user_id = session.get("user_id")
+    if not user_id:
+        return
+    if "role" in session and "telegram_verified" in session:
+        return
+    row = db_fetchone(
+        "SELECT role, telegram_verified_at FROM users WHERE id = ?",
+        (user_id,),
+    )
+    if not row:
+        return
+    session["role"] = row.get("role")
+    session["telegram_verified"] = bool(row.get("telegram_verified_at"))
 
 
 def fetch_summary() -> List[Dict[str, Any]]:
@@ -573,12 +764,18 @@ def auth_session() -> tuple[str, int] | tuple[Dict[str, Any], int]:
         return jsonify({"error": "invalid_token"}), 401
 
     email = user.get("email") or ""
-    role = upsert_user(user["id"], email)
+    state = upsert_user(user["id"], email)
+    role = state["role"]
+    telegram_verified = state["telegram_verified"]
     session["user_id"] = user["id"]
     session["email"] = email
     session["role"] = role
+    session["telegram_verified"] = telegram_verified
     session.permanent = True
-    redirect_url = url_for("index") if role == "admin" else url_for("pending")
+    if not telegram_verified:
+        redirect_url = url_for("telegram_link")
+    else:
+        redirect_url = url_for("index") if role == "admin" else url_for("pending")
     return jsonify({"ok": True, "role": role, "redirect": redirect_url}), 200
 
 
@@ -590,12 +787,100 @@ def logout() -> str:
 
 @app.get("/pending")
 @login_required
+@telegram_required
 def pending() -> str:
     return render_template("pending.html", today=date.today().isoformat())
 
 
+@app.get("/telegram-link")
+@login_required
+def telegram_link() -> str:
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+    row = db_fetchone(
+        "SELECT role, telegram_verified_at FROM users WHERE id = ?",
+        (user_id,),
+    )
+    if row and row.get("telegram_verified_at"):
+        session["telegram_verified"] = True
+        redirect_url = url_for("index") if session.get("role") == "admin" else url_for("pending")
+        return redirect(redirect_url)
+
+    bot_username = app.config.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+    deep_link = None
+    if telegram_enabled() and bot_username:
+        token = get_active_telegram_token(user_id) or create_telegram_token(user_id)
+        deep_link = f"https://t.me/{bot_username}?start={token}"
+    return render_template(
+        "telegram_link.html",
+        today=date.today().isoformat(),
+        bot_username=bot_username,
+        deep_link=deep_link,
+        token_ttl=app.config.get("TELEGRAM_TOKEN_TTL_MINUTES", 15),
+    )
+
+
+@app.get("/telegram/status")
+@login_required
+def telegram_status() -> tuple[Dict[str, Any], int]:
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"verified": False}), 200
+    row = db_fetchone(
+        "SELECT role, telegram_verified_at FROM users WHERE id = ?",
+        (user_id,),
+    )
+    verified = bool(row and row.get("telegram_verified_at"))
+    if verified:
+        session["telegram_verified"] = True
+        if row.get("role"):
+            session["role"] = row["role"]
+        redirect_url = url_for("index") if session.get("role") == "admin" else url_for("pending")
+        return jsonify({"verified": True, "redirect": redirect_url}), 200
+    return jsonify({"verified": False}), 200
+
+
+@app.post("/telegram/webhook/<secret>")
+def telegram_webhook(secret: str) -> tuple[Dict[str, Any], int]:
+    if not telegram_enabled() or secret != app.config.get("TELEGRAM_WEBHOOK_SECRET"):
+        abort(404)
+    payload = request.get_json(silent=True) or {}
+    message = payload.get("message") or payload.get("edited_message") or {}
+    if not message:
+        return jsonify({"ok": True}), 200
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    username = chat.get("username")
+    text = (message.get("text") or "").strip()
+    if not chat_id:
+        return jsonify({"ok": True}), 200
+
+    if text.startswith("/start"):
+        token = None
+        parts = text.split(maxsplit=1)
+        if len(parts) > 1:
+            token = parts[1].strip()
+        result = verify_telegram_token(token, chat_id, username)
+        if result == "ok":
+            send_telegram_message(chat_id, "Готово! Аккаунт подтверждён. Можно вернуться на сайт.")
+        elif result == "expired":
+            send_telegram_message(chat_id, "Ссылка устарела. Вернитесь на сайт и получите новую.")
+        elif result == "used":
+            send_telegram_message(chat_id, "Эта ссылка уже использована. Проверьте статус на сайте.")
+        elif result == "invalid":
+            send_telegram_message(chat_id, "Не смог найти ссылку. Откройте ссылку с сайта заново.")
+        else:
+            send_telegram_message(chat_id, "Нужна ссылка с сайта. Откройте её и нажмите Start.")
+    else:
+        send_telegram_message(chat_id, "Чтобы подтвердить аккаунт, откройте ссылку с сайта и нажмите Start.")
+
+    return jsonify({"ok": True}), 200
+
+
 @app.get("/invite/<token>")
 @login_required
+@telegram_required
 def accept_invite(token: str) -> str:
     row = db_fetchone(
         "SELECT token, expires_at, used_at FROM admin_invites WHERE token = ?",

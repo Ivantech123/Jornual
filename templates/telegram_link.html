@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-card telegram-card" data-telegram-page data-status-url="{{ url_for('telegram_status') }}">
+    <div class="auth-header">
+      <h1>Подтверждение через Telegram</h1>
+      <p class="muted">Мы подтверждаем аккаунты через бота — без писем и лишних шагов.</p>
+    </div>
+
+    {% if not telegram_enabled or not deep_link %}
+      <div class="flash flash-error">
+        Телеграм‑бот пока не настроен. Сообщите администратору.
+      </div>
+    {% else %}
+      <ol class="telegram-steps">
+        <li>Откройте бота <strong>@{{ bot_username }}</strong>.</li>
+        <li>Нажмите кнопку <strong>Start</strong> или отправьте команду <strong>/start</strong>.</li>
+        <li>Вернитесь на сайт — подтверждение появится автоматически.</li>
+      </ol>
+      <div class="telegram-actions">
+        <a class="primary" href="{{ deep_link }}" target="_blank" rel="noopener">Открыть Telegram</a>
+        <button type="button" class="secondary" data-telegram-refresh>Проверить статус</button>
+      </div>
+      <div class="telegram-link-box">
+        <span class="muted">Ссылка активна {{ token_ttl }} мин.</span>
+        <a href="{{ deep_link }}" target="_blank" rel="noopener">{{ deep_link }}</a>
+      </div>
+      <p class="auth-note" data-telegram-status>Ожидаем подтверждение…</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

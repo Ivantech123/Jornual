@@ -620,6 +620,49 @@ textarea:focus {
   font-size: 13px;
 }
 
+.telegram-card {
+  display: grid;
+  gap: 14px;
+}
+
+.telegram-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.telegram-steps strong {
+  color: var(--ink);
+}
+
+.telegram-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.telegram-link-box {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--stroke);
+  background: var(--bg-soft);
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.telegram-link-box a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.telegram-link-box a:hover {
+  text-decoration: underline;
+}
+
 .status-pill {
   padding: 6px 10px;
   border-radius: 999px;

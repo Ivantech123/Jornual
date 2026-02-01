@@ -55,10 +55,11 @@
     if (title) title.textContent = isSignup ? "Регистрация" : "Вход в журнал";
     if (subtitle) {
       subtitle.textContent = isSignup
-        ? "Создайте аккаунт. Доступ к журналу выдаётся по инвайту."
-        : "Авторизация для учителей. Доступ к журналу по инвайту.";
+        ? "Создайте аккаунт. Подтверждение доступа проходит через Telegram."
+        : "Авторизация для учителей. Доступ по инвайту и подтверждению в Telegram.";
     }
     if (note) {
+      note.textContent = "После регистрации подтвердите доступ через Telegram.";
       note.style.display = isSignup ? "block" : "none";
     }
     signupOnly.forEach((field) => {
@@ -143,7 +144,7 @@
           return;
         }
         if (!data.session) {
-          setStatus("Проверьте почту для подтверждения регистрации.");
+          setStatus("Регистрация создана. Подтвердите доступ в Telegram или проверьте настройки подтверждения email.");
           return;
         }
         await syncSession(data.session);
@@ -156,7 +157,51 @@
         await syncSession(data.session);
       }
     } catch (error) {
-      setStatus("Не удалось связаться с Supabase.", true);
+      setStatus("Не удалось связаться с сервером авторизации.", true);
     }
   });
+})();
+
+(() => {
+  const telegramPage = document.querySelector("[data-telegram-page]");
+  if (!telegramPage) return;
+
+  const statusEl = telegramPage.querySelector("[data-telegram-status]");
+  const refreshBtn = telegramPage.querySelector("[data-telegram-refresh]");
+  const statusUrl = telegramPage.dataset.statusUrl || "/telegram/status";
+  let inFlight = false;
+
+  const setStatus = (message) => {
+    if (statusEl) statusEl.textContent = message;
+  };
+
+  const checkStatus = async (manual = false) => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const response = await fetch(statusUrl, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (data.verified) {
+        setStatus("Подтверждение получено. Перенаправляем…");
+        window.location.href = data.redirect || "/pending";
+        return;
+      }
+      if (manual) {
+        setStatus("Пока не подтверждено. Проверьте Telegram и попробуйте снова.");
+      }
+    } catch (error) {
+      if (manual) {
+        setStatus("Не удалось проверить статус. Попробуйте ещё раз.");
+      }
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => checkStatus(true));
+  }
+
+  checkStatus(false);
+  setInterval(() => checkStatus(false), 3000);
 })();

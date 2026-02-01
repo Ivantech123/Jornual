@@ -24,6 +24,9 @@
           <span class="pill">Сегодня: {{ today }}</span>
           {% if current_user %}
             <span class="status-pill">{{ current_user.email }}</span>
+            {% if not telegram_verified %}
+              <a class="ghost-link" href="{{ url_for('telegram_link') }}">Telegram</a>
+            {% endif %}
             {% if is_admin %}
               <a class="ghost-link" href="{{ url_for('index') }}">Журнал</a>
               <a class="ghost-link" href="{{ url_for('admin_panel') }}">Админ</a>

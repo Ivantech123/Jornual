@@ -31,6 +31,22 @@ python app.py
 - `DATABASE_URL` — альтернативный URL подключения к Postgres (резервный вариант).
 - `ADMIN_EMAILS` — список email через запятую, которым сразу выдаётся роль admin.
 - `INVITE_TTL_DAYS` — срок действия инвайта в днях (по умолчанию 7).
+- `TELEGRAM_BOT_TOKEN` — токен Telegram-бота.
+- `TELEGRAM_BOT_USERNAME` — username бота без @.
+- `TELEGRAM_WEBHOOK_SECRET` — секрет для URL вебхука (используется в пути).
+- `TELEGRAM_TOKEN_TTL_MINUTES` — время жизни ссылки подтверждения в минутах (по умолчанию 15).
+
+## Telegram-подтверждение
+
+1) Создайте бота через @BotFather и получите токен.  
+2) Укажите в переменных окружения `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET`.  
+3) Вызовите `setWebhook`, чтобы Telegram слал апдейты на ваш домен:
+
+```
+https://api.telegram.org/bot<token>/setWebhook?url=https://<domain>/telegram/webhook/<secret>
+```
+
+4) В Supabase Auth отключите подтверждение email, чтобы авторизация не зависела от писем.
 
 ## Деплой на Vercel
 
