@@ -38,6 +38,15 @@
   if (!authForm) return;
 
   const status = document.querySelector("[data-auth-status]");
+  const actionField = authForm.querySelector("[name='action']");
+  const actionButtons = authForm.querySelectorAll("[data-action]");
+  actionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (actionField) {
+        actionField.value = button.dataset.action || "login";
+      }
+    });
+  });
   const setStatus = (message, isError = false) => {
     if (!status) return;
     status.textContent = message;
@@ -68,7 +77,7 @@
     event.preventDefault();
     const email = authForm.querySelector("[name='email']").value.trim();
     const password = authForm.querySelector("[name='password']").value;
-    const action = event.submitter?.dataset.action || "login";
+    const action = (actionField && actionField.value) || "login";
 
     if (!email || !password) {
       setStatus("Введите email и пароль.", true);
@@ -79,7 +88,13 @@
 
     try {
       if (action === "signup") {
-        const { data, error } = await client.auth.signUp({ email, password });
+        const { data, error } = await client.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/login`,
+          },
+        });
         if (error) {
           setStatus(error.message, true);
           return;
