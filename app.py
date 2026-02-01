@@ -113,7 +113,7 @@ def configure_connection(conn: sqlite3.Connection) -> None:
 
 
 def connect_postgres():
-    import psycopg2
+    import psycopg
 
     dsn = app.config["DATABASE"]
     if not dsn:
@@ -137,7 +137,7 @@ def connect_postgres():
     except Exception:
         pass
 
-    return psycopg2.connect(dsn, **kwargs)
+    return psycopg.connect(dsn, **kwargs)
 
 
 def ensure_schema() -> None:
@@ -262,12 +262,12 @@ def ensure_schema() -> None:
 def get_db():
     if "db" not in g:
         if is_postgres():
-            from psycopg2.extras import RealDictCursor
+            from psycopg.rows import dict_row
 
             conn = connect_postgres()
             conn.autocommit = False
             g.db = conn
-            g.db_cursor_factory = RealDictCursor
+            g.db_row_factory = dict_row
         else:
             db = sqlite3.connect(app.config["DATABASE"], detect_types=sqlite3.PARSE_DECLTYPES)
             db.row_factory = sqlite3.Row
@@ -280,8 +280,8 @@ def db_fetchall(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
     conn = get_db()
     sql = adapt_sql(sql)
     if is_postgres():
-        cursor_factory = g.get("db_cursor_factory")
-        with conn.cursor(cursor_factory=cursor_factory) as cur:
+        row_factory = g.get("db_row_factory")
+        with conn.cursor(row_factory=row_factory) as cur:
             cur.execute(sql, params)
             rows = cur.fetchall()
         return [dict(row) for row in rows]
@@ -293,8 +293,8 @@ def db_fetchone(sql: str, params: tuple = ()) -> Dict[str, Any] | None:
     conn = get_db()
     sql = adapt_sql(sql)
     if is_postgres():
-        cursor_factory = g.get("db_cursor_factory")
-        with conn.cursor(cursor_factory=cursor_factory) as cur:
+        row_factory = g.get("db_row_factory")
+        with conn.cursor(row_factory=row_factory) as cur:
             cur.execute(sql, params)
             row = cur.fetchone()
         return dict(row) if row else None
