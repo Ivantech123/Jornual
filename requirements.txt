@@ -1,1 +1,1 @@
-# No external dependencies required.
+﻿Flask>=2.3

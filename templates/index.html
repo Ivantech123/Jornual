@@ -1,0 +1,174 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-text">
+    <h1>Вся картина класса — на одном экране.</h1>
+    <p>Добавляйте оценки и посещаемость, а система сама считает средние значения и формирует сводку.</p>
+    <div class="stats-grid">
+      <div class="stat-card" data-animate>
+        <p class="stat-label">Ученики</p>
+        <p class="stat-value">{{ class_stats.students_count }}</p>
+        <p class="stat-note">В базе сейчас</p>
+      </div>
+      <div class="stat-card" data-animate style="--delay: 0.05s;">
+        <p class="stat-label">Средняя оценка</p>
+        <p class="stat-value">{{ class_stats.average_grade }}</p>
+        <p class="stat-note">{{ class_stats.grades_count }} записей</p>
+      </div>
+      <div class="stat-card" data-animate style="--delay: 0.1s;">
+        <p class="stat-label">Посещаемость</p>
+        <p class="stat-value">{{ class_stats.attendance_rate }}%</p>
+        <p class="stat-note">{{ class_stats.attendance_count }} отметок</p>
+      </div>
+    </div>
+  </div>
+  <div class="hero-card" id="add-student">
+    <h2>Новый ученик</h2>
+    <form class="form-grid" action="{{ url_for('add_student') }}" method="post">
+      <label>
+        <span>ID ученика</span>
+        <input name="student_id" placeholder="S001" required>
+      </label>
+      <label>
+        <span>Имя и фамилия</span>
+        <input name="name" placeholder="Иван Петров" required>
+      </label>
+      <button type="submit" class="primary">Добавить</button>
+    </form>
+    <div class="helper">
+      <p>Совет: используйте уникальные IDs, чтобы быстро искать ученика.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section quick-grid">
+  <div class="panel quick-actions">
+    <h2>Быстрые действия</h2>
+    <div class="quick-actions-grid">
+      <a class="quick-card" href="#add-student">Добавить ученика</a>
+      <a class="quick-card" href="#students-table">Список учеников</a>
+    </div>
+
+    {% if students %}
+      <form class="quick-form" action="{{ url_for('open_student') }}" method="get">
+        <label>
+          <span>Открыть карточку</span>
+          <select name="student_id" required>
+            <option value="" disabled selected>Выберите ученика</option>
+            {% for student in students %}
+              <option value="{{ student.student_id }}">{{ student.student_id }} — {{ student.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="primary">Открыть</button>
+      </form>
+
+      <form class="quick-form" action="{{ url_for('add_attendance_quick') }}" method="post">
+        <div class="quick-form-row">
+          <label>
+            <span>Посещаемость</span>
+            <select name="student_id" required>
+              <option value="" disabled selected>Выберите ученика</option>
+              {% for student in students %}
+                <option value="{{ student.student_id }}">{{ student.student_id }} — {{ student.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Дата</span>
+            <input type="date" name="date" value="{{ today }}" required>
+          </label>
+        </div>
+        <div class="segmented">
+          <label class="segment">
+            <input type="radio" name="present" value="1" checked>
+            <span>Присутствовал</span>
+          </label>
+          <label class="segment">
+            <input type="radio" name="present" value="0">
+            <span>Отсутствовал</span>
+          </label>
+        </div>
+        <label>
+          <span>Примечание</span>
+          <input name="note" placeholder="Опоздание, справка">
+        </label>
+        <button type="submit" class="primary">Отметить</button>
+      </form>
+    {% else %}
+      <div class="empty">Добавьте учеников, чтобы пользоваться быстрыми действиями.</div>
+    {% endif %}
+  </div>
+
+  <div class="panel mini-chart">
+    <h2>Мини‑график посещаемости</h2>
+    {% if attendance_trend %}
+      <div class="chart-bars">
+        {% for item in attendance_trend %}
+        <div class="chart-bar" style="--value: {{ item.rate }};" title="{{ item.date }}: {{ item.rate }}% ({{ item.count }} отметок)">
+          <span></span>
+          <small>{{ item.date[5:] }}</small>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="muted chart-caption">Средняя посещаемость за последние {{ attendance_trend|length }} дней.</p>
+    {% else %}
+      <div class="empty">Нет данных для графика.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="table-card" id="students-table">
+    <div class="table-header">
+      <div>
+        <h2>Список учеников</h2>
+        <p class="muted">Нажмите на ученика, чтобы открыть подробную карточку.</p>
+      </div>
+      <div class="table-tools">
+        <input id="studentFilter" class="input-ghost" type="search" placeholder="Поиск по имени или ID">
+      </div>
+    </div>
+
+    {% if students %}
+      <div class="table-scroll">
+        <table class="data-table" aria-label="Список учеников">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Имя</th>
+              <th>Средняя оценка</th>
+              <th>Оценок</th>
+              <th>Посещаемость</th>
+              <th>Отметок</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for student in students %}
+            <tr class="student-row" data-name="{{ student.name|lower }}" data-id="{{ student.student_id|lower }}">
+              <td><span class="chip">{{ student.student_id }}</span></td>
+              <td>{{ student.name }}</td>
+              <td>{{ student.average_grade }}</td>
+              <td>{{ student.grades_count }}</td>
+              <td>
+                <span class="badge {% if student.attendance_rate >= 80 %}badge-good{% elif student.attendance_rate >= 60 %}badge-warn{% else %}badge-bad{% endif %}">
+                  {{ student.attendance_rate }}%
+                </span>
+              </td>
+              <td>{{ student.attendance_count }}</td>
+              <td><a class="ghost-link" href="{{ url_for('student_detail', student_id=student.student_id) }}">Открыть</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">
+        <p>Пока нет учеников. Добавьте первого — и журнал оживёт.</p>
+      </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

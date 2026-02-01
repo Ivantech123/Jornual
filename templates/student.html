@@ -1,0 +1,170 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="student-hero">
+  <div class="student-title">
+    <a class="ghost-link" href="{{ url_for('index') }}">← Назад к списку</a>
+    <h1>{{ student.name }}</h1>
+    <p class="muted">ID: {{ student.student_id }}</p>
+  </div>
+  <div class="stats-grid compact">
+    <div class="stat-card" data-animate>
+      <p class="stat-label">Средняя оценка</p>
+      <p class="stat-value">{{ stats.average_grade }}</p>
+      <p class="stat-note">{{ stats.grades_count }} записей</p>
+    </div>
+    <div class="stat-card" data-animate style="--delay: 0.05s;">
+      <p class="stat-label">Посещаемость</p>
+      <p class="stat-value">{{ stats.attendance_rate }}%</p>
+      <p class="stat-note">{{ stats.attendance_count }} отметок</p>
+    </div>
+  </div>
+</section>
+
+<section class="section split">
+  <div class="panel">
+    <h2>Добавить оценку</h2>
+    <form class="form-grid" action="{{ url_for('add_grade', student_id=student.student_id) }}" method="post">
+      <label>
+        <span>Предмет</span>
+        <input name="subject" placeholder="Математика" required>
+      </label>
+      <label>
+        <span>Оценка</span>
+        <input name="grade" placeholder="5" required>
+      </label>
+      <label>
+        <span>Дата</span>
+        <input type="date" name="date" value="{{ today }}" required>
+      </label>
+      <label>
+        <span>Примечание</span>
+        <input name="note" placeholder="Контрольная">
+      </label>
+      <button type="submit" class="primary">Сохранить оценку</button>
+    </form>
+  </div>
+  <div class="panel">
+    <h2>Отметить посещаемость</h2>
+    <form class="form-grid" action="{{ url_for('add_attendance', student_id=student.student_id) }}" method="post">
+      <label>
+        <span>Дата</span>
+        <input type="date" name="date" value="{{ today }}" required>
+      </label>
+      <label>
+        <span>Статус</span>
+        <div class="segmented">
+          <label class="segment">
+            <input type="radio" name="present" value="1" checked>
+            <span>Присутствовал</span>
+          </label>
+          <label class="segment">
+            <input type="radio" name="present" value="0">
+            <span>Отсутствовал</span>
+          </label>
+        </div>
+      </label>
+      <label>
+        <span>Примечание</span>
+        <input name="note" placeholder="Болел">
+      </label>
+      <button type="submit" class="primary">Отметить</button>
+    </form>
+  </div>
+</section>
+
+<section class="section">
+  <div class="panel">
+    <h2>Средние по предметам</h2>
+    {% if subjects %}
+      <div class="table-scroll">
+        <table class="data-table compact" aria-label="Средние по предметам">
+          <thead>
+            <tr>
+              <th>Предмет</th>
+              <th>Средняя оценка</th>
+              <th>Количество</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for subject in subjects %}
+            <tr>
+              <td>{{ subject.subject }}</td>
+              <td>{{ subject.average }}</td>
+              <td>{{ subject.count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">Нет оценок по предметам.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section split">
+  <div class="panel">
+    <h2>Оценки</h2>
+    {% if grades %}
+      <div class="table-scroll">
+        <table class="data-table compact" aria-label="Оценки">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Предмет</th>
+              <th>Оценка</th>
+              <th>Примечание</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for grade in grades %}
+            <tr>
+              <td>{{ grade.date }}</td>
+              <td>{{ grade.subject }}</td>
+              <td>{{ grade.grade }}</td>
+              <td>{{ grade.note or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">Оценок пока нет.</div>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <h2>Посещаемость</h2>
+    {% if attendance %}
+      <div class="table-scroll">
+        <table class="data-table compact" aria-label="Посещаемость">
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Статус</th>
+              <th>Примечание</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in attendance %}
+            <tr>
+              <td>{{ entry.date }}</td>
+              <td>
+                {% if entry.present == 1 %}
+                  <span class="badge badge-good">Присутствовал</span>
+                {% else %}
+                  <span class="badge badge-bad">Отсутствовал</span>
+                {% endif %}
+              </td>
+              <td>{{ entry.note or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">Посещаемость пока не отмечалась.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
