@@ -27,6 +27,7 @@ python app.py
 - `SUPABASE_URL` — URL проекта Supabase.
 - `SUPABASE_ANON_KEY` — публичный ключ Supabase (anon).
 - `SUPABASE_DB_URL` — строка подключения к Postgres в Supabase (если задана, используется Postgres вместо SQLite).
+- `SUPABASE_POOLER_URL` — строка подключения к Transaction Pooler (рекомендуется для Vercel).
 - `DATABASE_URL` — альтернативный URL подключения к Postgres (резервный вариант).
 - `ADMIN_EMAILS` — список email через запятую, которым сразу выдаётся роль admin.
 - `INVITE_TTL_DAYS` — срок действия инвайта в днях (по умолчанию 7).

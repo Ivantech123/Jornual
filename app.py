@@ -31,6 +31,7 @@ app.config["SECRET_KEY"] = os.environ.get("JOURNAL_SECRET", "dev-key-change-me")
 app.config["SUPABASE_URL"] = os.environ.get("SUPABASE_URL", "").strip()
 app.config["SUPABASE_ANON_KEY"] = os.environ.get("SUPABASE_ANON_KEY", "").strip()
 app.config["SUPABASE_DB_URL"] = os.environ.get("SUPABASE_DB_URL", "").strip()
+app.config["SUPABASE_POOLER_URL"] = os.environ.get("SUPABASE_POOLER_URL", "").strip()
 app.config["DATABASE_URL"] = os.environ.get("DATABASE_URL", "").strip()
 app.config["INVITE_TTL_DAYS"] = int(os.environ.get("INVITE_TTL_DAYS", "7"))
 
@@ -40,10 +41,21 @@ ADMIN_EMAILS = {
     if value.strip()
 }
 
-app.config["DB_ENGINE"] = "postgres" if app.config["SUPABASE_DB_URL"] or app.config["DATABASE_URL"] else "sqlite"
+app.config["DB_ENGINE"] = (
+    "postgres"
+    if app.config["SUPABASE_DB_URL"]
+    or app.config["SUPABASE_POOLER_URL"]
+    or app.config["DATABASE_URL"]
+    else "sqlite"
+)
 
 if app.config["DB_ENGINE"] == "postgres":
-    app.config["DATABASE"] = app.config["SUPABASE_DB_URL"] or app.config["DATABASE_URL"]
+    if os.environ.get("VERCEL") and app.config["SUPABASE_POOLER_URL"]:
+        app.config["DATABASE"] = app.config["SUPABASE_POOLER_URL"]
+    else:
+        app.config["DATABASE"] = (
+            app.config["SUPABASE_DB_URL"] or app.config["SUPABASE_POOLER_URL"] or app.config["DATABASE_URL"]
+        )
 else:
     app.config["DATABASE"] = Path(os.environ.get("JOURNAL_DB_PATH", str(DEFAULT_DB_PATH)))
     if os.environ.get("VERCEL") and "JOURNAL_DB_PATH" not in os.environ:
@@ -779,6 +791,5 @@ def add_attendance(student_id: str) -> str:
     return redirect(url_for("student_detail", student_id=student_id))
 
 
-ensure_schema()
 if __name__ == "__main__":
     app.run(debug=True)
