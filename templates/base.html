@@ -22,7 +22,18 @@
         </div>
         <div class="header-meta">
           <span class="pill">Сегодня: {{ today }}</span>
-          <a class="ghost-link" href="{{ url_for('index') }}">Главная</a>
+          {% if current_user %}
+            <span class="status-pill">{{ current_user.email }}</span>
+            {% if is_admin %}
+              <a class="ghost-link" href="{{ url_for('index') }}">Журнал</a>
+              <a class="ghost-link" href="{{ url_for('admin_panel') }}">Админ</a>
+            {% else %}
+              <a class="ghost-link" href="{{ url_for('pending') }}">Доступ</a>
+            {% endif %}
+            <a class="ghost-link" href="{{ url_for('logout') }}" data-logout>Выйти</a>
+          {% else %}
+            <a class="ghost-link" href="{{ url_for('login') }}">Войти</a>
+          {% endif %}
         </div>
       </div>
     </header>
@@ -47,6 +58,15 @@
       </div>
     </footer>
 
+    {% if supabase_url and supabase_anon_key %}
+      <script>
+        window.__supabase = {
+          url: "{{ supabase_url }}",
+          key: "{{ supabase_anon_key }}"
+        };
+      </script>
+      <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    {% endif %}
     <script src="{{ url_for('static', filename='app.js') }}"></script>
     {% block scripts %}{% endblock %}
   </body>

@@ -1,0 +1,16 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-card">
+    <h1>Доступ ожидает подтверждения</h1>
+    {% if current_user %}
+      <p class="muted">Вы вошли как {{ current_user.email }}.</p>
+    {% endif %}
+    <p>Попросите у администратора ссылку‑инвайт. После перехода по ней доступ учителя активируется автоматически.</p>
+    <div class="helper">
+      <p>Инвайт — одноразовая ссылка, её создаёт администратор в панели.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -23,7 +23,7 @@
       </div>
     </div>
   </div>
-  <div class="hero-card" id="add-student">
+  <div class="hero-card">
     <h2>Новый ученик</h2>
     <form class="form-grid" action="{{ url_for('add_student') }}" method="post">
       <label>
@@ -42,85 +42,8 @@
   </div>
 </section>
 
-<section class="section quick-grid">
-  <div class="panel quick-actions">
-    <h2>Быстрые действия</h2>
-    <div class="quick-actions-grid">
-      <a class="quick-card" href="#add-student">Добавить ученика</a>
-      <a class="quick-card" href="#students-table">Список учеников</a>
-    </div>
-
-    {% if students %}
-      <form class="quick-form" action="{{ url_for('open_student') }}" method="get">
-        <label>
-          <span>Открыть карточку</span>
-          <select name="student_id" required>
-            <option value="" disabled selected>Выберите ученика</option>
-            {% for student in students %}
-              <option value="{{ student.student_id }}">{{ student.student_id }} — {{ student.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit" class="primary">Открыть</button>
-      </form>
-
-      <form class="quick-form" action="{{ url_for('add_attendance_quick') }}" method="post">
-        <div class="quick-form-row">
-          <label>
-            <span>Посещаемость</span>
-            <select name="student_id" required>
-              <option value="" disabled selected>Выберите ученика</option>
-              {% for student in students %}
-                <option value="{{ student.student_id }}">{{ student.student_id }} — {{ student.name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>
-            <span>Дата</span>
-            <input type="date" name="date" value="{{ today }}" required>
-          </label>
-        </div>
-        <div class="segmented">
-          <label class="segment">
-            <input type="radio" name="present" value="1" checked>
-            <span>Присутствовал</span>
-          </label>
-          <label class="segment">
-            <input type="radio" name="present" value="0">
-            <span>Отсутствовал</span>
-          </label>
-        </div>
-        <label>
-          <span>Примечание</span>
-          <input name="note" placeholder="Опоздание, справка">
-        </label>
-        <button type="submit" class="primary">Отметить</button>
-      </form>
-    {% else %}
-      <div class="empty">Добавьте учеников, чтобы пользоваться быстрыми действиями.</div>
-    {% endif %}
-  </div>
-
-  <div class="panel mini-chart">
-    <h2>Мини‑график посещаемости</h2>
-    {% if attendance_trend %}
-      <div class="chart-bars">
-        {% for item in attendance_trend %}
-        <div class="chart-bar" style="--value: {{ item.rate }};" title="{{ item.date }}: {{ item.rate }}% ({{ item.count }} отметок)">
-          <span></span>
-          <small>{{ item.date[5:] }}</small>
-        </div>
-        {% endfor %}
-      </div>
-      <p class="muted chart-caption">Средняя посещаемость за последние {{ attendance_trend|length }} дней.</p>
-    {% else %}
-      <div class="empty">Нет данных для графика.</div>
-    {% endif %}
-  </div>
-</section>
-
 <section class="section">
-  <div class="table-card" id="students-table">
+  <div class="table-card">
     <div class="table-header">
       <div>
         <h2>Список учеников</h2>

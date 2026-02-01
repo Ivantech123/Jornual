@@ -1,0 +1,32 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-layout">
+  <div class="auth-card">
+    <h1>Вход в журнал</h1>
+    <p class="muted">Авторизация через Supabase. После регистрации нужен инвайт для доступа к журналу учителя.</p>
+
+    {% if not supabase_url or not supabase_anon_key %}
+      <div class="flash flash-error">
+        Supabase не настроен. Укажите переменные SUPABASE_URL и SUPABASE_ANON_KEY.
+      </div>
+    {% else %}
+      <form class="form-grid" data-auth-form>
+        <label>
+          <span>Email</span>
+          <input type="email" name="email" placeholder="teacher@mail.com" required>
+        </label>
+        <label>
+          <span>Пароль</span>
+          <input type="password" name="password" placeholder="••••••••" required>
+        </label>
+        <div class="auth-actions">
+          <button type="submit" class="primary" data-action="login">Войти</button>
+          <button type="submit" class="secondary" data-action="signup">Зарегистрироваться</button>
+        </div>
+      </form>
+      <p class="auth-note" data-auth-status></p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

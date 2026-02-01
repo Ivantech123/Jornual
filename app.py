@@ -2,12 +2,15 @@
 
 import math
 import os
+import secrets
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List
 
-from flask import Flask, flash, g, redirect, render_template, request, url_for
+import requests
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -18,6 +21,19 @@ app.config["SECRET_KEY"] = os.environ.get("JOURNAL_SECRET", "dev-key-change-me")
 app.config["DATABASE"] = Path(os.environ.get("JOURNAL_DB_PATH", str(DEFAULT_DB_PATH)))
 if os.environ.get("VERCEL") and "JOURNAL_DB_PATH" not in os.environ:
     app.config["DATABASE"] = Path("/tmp/journal.db")
+app.config["SUPABASE_URL"] = os.environ.get("SUPABASE_URL", "").strip()
+app.config["SUPABASE_ANON_KEY"] = os.environ.get("SUPABASE_ANON_KEY", "").strip()
+app.config["INVITE_TTL_DAYS"] = int(os.environ.get("INVITE_TTL_DAYS", "7"))
+
+ADMIN_EMAILS = {
+    value.strip().lower()
+    for value in os.environ.get("ADMIN_EMAILS", "").split(",")
+    if value.strip()
+}
+
+
+def now_iso() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 DEFAULT_STUDENTS = [
     "Andreev",
@@ -90,6 +106,25 @@ def ensure_schema() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_attendance_student_date
             ON attendance(student_id, date);
+
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT NOT NULL,
+            last_seen TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_users_role
+            ON users(role);
+
+        CREATE TABLE IF NOT EXISTS admin_invites (
+            token TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            expires_at TEXT,
+            used_by TEXT,
+            used_at TEXT
+        );
         """
     )
     conn.commit()
@@ -110,6 +145,119 @@ def close_db(exception: Exception | None = None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+def fetch_supabase_user(access_token: str) -> Dict[str, Any] | None:
+    supabase_url = app.config["SUPABASE_URL"]
+    supabase_key = app.config["SUPABASE_ANON_KEY"]
+    if not supabase_url or not supabase_key or not access_token:
+        return None
+    url = f"{supabase_url.rstrip('/')}/auth/v1/user"
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "apikey": supabase_key,
+            },
+            timeout=6,
+        )
+    except requests.RequestException:
+        return None
+    if response.status_code != 200:
+        return None
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
+def upsert_user(user_id: str, email: str) -> str:
+    db = get_db()
+    now = now_iso()
+    row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if row:
+        role = row["role"]
+        db.execute(
+            "UPDATE users SET email = ?, last_seen = ? WHERE id = ?",
+            (email, now, user_id),
+        )
+    else:
+        role = "admin" if email.lower() in ADMIN_EMAILS else "user"
+        db.execute(
+            "INSERT INTO users (id, email, role, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+            (user_id, email, role, now, now),
+        )
+    db.commit()
+    return role
+
+
+def list_users() -> List[Dict[str, Any]]:
+    rows = get_db().execute(
+        "SELECT id, email, role, created_at, last_seen FROM users ORDER BY created_at DESC"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_invites() -> List[Dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT token, created_at, expires_at, used_by, used_at
+        FROM admin_invites
+        ORDER BY created_at DESC
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_invite() -> str:
+    token = secrets.token_urlsafe(24)
+    now = now_iso()
+    ttl_days = app.config.get("INVITE_TTL_DAYS", 7)
+    expires_at = (datetime.utcnow() + timedelta(days=ttl_days)).replace(microsecond=0).isoformat() + "Z"
+    get_db().execute(
+        "INSERT INTO admin_invites (token, created_at, expires_at) VALUES (?, ?, ?)",
+        (token, now, expires_at),
+    )
+    get_db().commit()
+    return token
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapper
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect(url_for("login"))
+        if session.get("role") != "admin":
+            return redirect(url_for("pending"))
+        return view(*args, **kwargs)
+
+    return wrapper
+
+
+@app.context_processor
+def inject_globals() -> Dict[str, Any]:
+    return {
+        "current_user": {
+            "email": session.get("email"),
+            "role": session.get("role"),
+        }
+        if session.get("user_id")
+        else None,
+        "is_admin": session.get("role") == "admin",
+        "supabase_url": app.config["SUPABASE_URL"],
+        "supabase_anon_key": app.config["SUPABASE_ANON_KEY"],
+    }
 
 
 def seed_students_if_empty() -> None:
@@ -198,32 +346,6 @@ def fetch_class_stats() -> Dict[str, Any]:
     }
 
 
-def fetch_attendance_trend(limit: int = 7) -> List[Dict[str, Any]]:
-    db = get_db()
-    rows = db.execute(
-        """
-        SELECT date,
-               AVG(CASE WHEN present = 1 THEN 1.0 ELSE 0.0 END) AS attendance_rate,
-               COUNT(*) AS attendance_count
-        FROM attendance
-        GROUP BY date
-        ORDER BY date DESC
-        LIMIT ?
-        """,
-        (limit,),
-    ).fetchall()
-    trend = [
-        {
-            "date": row["date"],
-            "rate": round(float(row["attendance_rate"] or 0.0) * 100, 2),
-            "count": int(row["attendance_count"] or 0),
-        }
-        for row in rows
-    ]
-    return list(reversed(trend))
-
-
-
 def get_student(student_id: str) -> sqlite3.Row | None:
     return get_db().execute(
         "SELECT student_id, name FROM students WHERE student_id = ?",
@@ -255,21 +377,114 @@ def get_student_stats(student_id: str) -> Dict[str, Any]:
     }
 
 
+@app.get("/login")
+def login() -> str:
+    return render_template("login.html", today=date.today().isoformat())
+
+
+@app.post("/auth/session")
+def auth_session() -> tuple[str, int] | tuple[Dict[str, Any], int]:
+    payload = request.get_json(silent=True) or {}
+    access_token = (payload.get("access_token") or "").strip()
+    if not access_token:
+        return jsonify({"error": "missing_token"}), 400
+
+    user = fetch_supabase_user(access_token)
+    if not user or not user.get("id"):
+        return jsonify({"error": "invalid_token"}), 401
+
+    email = user.get("email") or ""
+    role = upsert_user(user["id"], email)
+    session["user_id"] = user["id"]
+    session["email"] = email
+    session["role"] = role
+    session.permanent = True
+    redirect_url = url_for("index") if role == "admin" else url_for("pending")
+    return jsonify({"ok": True, "role": role, "redirect": redirect_url}), 200
+
+
+@app.get("/logout")
+def logout() -> str:
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.get("/pending")
+@login_required
+def pending() -> str:
+    return render_template("pending.html", today=date.today().isoformat())
+
+
+@app.get("/invite/<token>")
+@login_required
+def accept_invite(token: str) -> str:
+    db = get_db()
+    row = db.execute(
+        "SELECT token, expires_at, used_at FROM admin_invites WHERE token = ?",
+        (token,),
+    ).fetchone()
+    if not row:
+        flash("Инвайт не найден.", "error")
+        return redirect(url_for("pending"))
+    if row["used_at"]:
+        flash("Инвайт уже использован.", "error")
+        return redirect(url_for("pending"))
+    expires_at = row["expires_at"]
+    if expires_at and expires_at < now_iso():
+        flash("Инвайт истёк.", "error")
+        return redirect(url_for("pending"))
+
+    user_id = session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    db.execute("UPDATE users SET role = 'admin' WHERE id = ?", (user_id,))
+    db.execute(
+        "UPDATE admin_invites SET used_by = ?, used_at = ? WHERE token = ?",
+        (user_id, now_iso(), token),
+    )
+    db.commit()
+    session["role"] = "admin"
+    flash("Доступ учителя активирован.", "success")
+    return redirect(url_for("index"))
+
+
+@app.get("/admin")
+@admin_required
+def admin_panel() -> str:
+    users = list_users()
+    invites = list_invites()
+    return render_template(
+        "admin.html",
+        users=users,
+        invites=invites,
+        today=date.today().isoformat(),
+    )
+
+
+@app.post("/admin/invites")
+@admin_required
+def create_invite_route() -> str:
+    token = create_invite()
+    flash(f"Инвайт создан: {request.url_root}invite/{token}", "success")
+    return redirect(url_for("admin_panel"))
+
+
 @app.route("/")
+@admin_required
 def index() -> str:
     students = fetch_summary()
     class_stats = fetch_class_stats()
-    attendance_trend = fetch_attendance_trend()
     return render_template(
         "index.html",
         students=students,
         class_stats=class_stats,
-        attendance_trend=attendance_trend,
         today=date.today().isoformat(),
     )
 
 
 @app.post("/students")
+@admin_required
 def add_student() -> str:
     student_id = (request.form.get("student_id") or "").strip()
     name = (request.form.get("name") or "").strip()
@@ -291,16 +506,8 @@ def add_student() -> str:
     return redirect(url_for("index"))
 
 
-@app.get("/students/open")
-def open_student() -> str:
-    student_id = (request.args.get("student_id") or "").strip()
-    if not student_id:
-        flash("Выберите ученика.", "error")
-        return redirect(url_for("index"))
-    return redirect(url_for("student_detail", student_id=student_id))
-
-
 @app.route("/students/<student_id>")
+@admin_required
 def student_detail(student_id: str) -> str:
     student = get_student(student_id)
     if not student:
@@ -351,6 +558,7 @@ def student_detail(student_id: str) -> str:
 
 
 @app.post("/students/<student_id>/grades")
+@admin_required
 def add_grade(student_id: str) -> str:
     student = get_student(student_id)
     if not student:
@@ -386,6 +594,7 @@ def add_grade(student_id: str) -> str:
 
 
 @app.post("/students/<student_id>/attendance")
+@admin_required
 def add_attendance(student_id: str) -> str:
     student = get_student(student_id)
     if not student:
@@ -407,32 +616,6 @@ def add_attendance(student_id: str) -> str:
     get_db().commit()
     flash("Посещаемость отмечена.", "success")
     return redirect(url_for("student_detail", student_id=student_id))
-
-
-@app.post("/attendance/quick")
-def add_attendance_quick() -> str:
-    student_id = (request.form.get("student_id") or "").strip()
-    entry_date = (request.form.get("date") or date.today().isoformat()).strip()
-    present_raw = request.form.get("present")
-    note = (request.form.get("note") or "").strip() or None
-
-    if not student_id:
-        flash("Выберите ученика.", "error")
-        return redirect(url_for("index"))
-    if present_raw not in {"1", "0"}:
-        flash("Выберите статус посещаемости.", "error")
-        return redirect(url_for("index"))
-    if not get_student(student_id):
-        flash("Ученик не найден.", "error")
-        return redirect(url_for("index"))
-
-    get_db().execute(
-        "INSERT INTO attendance (student_id, date, present, note) VALUES (?, ?, ?, ?)",
-        (student_id, entry_date, int(present_raw), note),
-    )
-    get_db().commit()
-    flash("Посещаемость отмечена.", "success")
-    return redirect(url_for("index"))
 
 
 ensure_schema()

@@ -24,6 +24,10 @@ python app.py
 
 - `JOURNAL_DB_PATH` — путь к файлу базы данных SQLite (по умолчанию `data/journal.db`).
 - `JOURNAL_SECRET` — секретный ключ для flash-сообщений (в продакшене обязательно поменять).
+- `SUPABASE_URL` — URL проекта Supabase.
+- `SUPABASE_ANON_KEY` — публичный ключ Supabase (anon).
+- `ADMIN_EMAILS` — список email через запятую, которым сразу выдаётся роль admin.
+- `INVITE_TTL_DAYS` — срок действия инвайта в днях (по умолчанию 7).
 
 ## Деплой на Vercel
 

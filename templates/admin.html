@@ -1,0 +1,79 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="section">
+  <div class="panel">
+    <h2>Админ‑панель</h2>
+    <p class="muted">Инвайты и список зарегистрированных пользователей.</p>
+  </div>
+</section>
+
+<section class="section admin-grid">
+  <div class="panel">
+    <h2>Инвайты</h2>
+    <form action="{{ url_for('create_invite_route') }}" method="post">
+      <button type="submit" class="primary">Создать инвайт</button>
+    </form>
+
+    {% if invites %}
+      <div class="table-scroll">
+        <table class="data-table compact" aria-label="Инвайты">
+          <thead>
+            <tr>
+              <th>Ссылка</th>
+              <th>Создан</th>
+              <th>Истекает</th>
+              <th>Использован</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for invite in invites %}
+            <tr>
+              <td>
+                <span class="chip">/invite/{{ invite.token }}</span>
+              </td>
+              <td>{{ invite.created_at }}</td>
+              <td>{{ invite.expires_at or "—" }}</td>
+              <td>{{ invite.used_at or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="helper">Полная ссылка: {{ request.url_root }}invite/&lt;token&gt;</p>
+    {% else %}
+      <div class="empty">Инвайтов пока нет.</div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Зарегистрированные</h2>
+    {% if users %}
+      <div class="table-scroll">
+        <table class="data-table compact" aria-label="Пользователи">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Роль</th>
+              <th>Создан</th>
+              <th>Последний вход</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+            <tr>
+              <td>{{ user.email }}</td>
+              <td><span class="badge">{{ user.role }}</span></td>
+              <td>{{ user.created_at }}</td>
+              <td>{{ user.last_seen }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">Пользователей нет.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
