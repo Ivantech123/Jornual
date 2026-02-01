@@ -26,6 +26,8 @@ python app.py
 - `JOURNAL_SECRET` — секретный ключ для flash-сообщений (в продакшене обязательно поменять).
 - `SUPABASE_URL` — URL проекта Supabase.
 - `SUPABASE_ANON_KEY` — публичный ключ Supabase (anon).
+- `SUPABASE_DB_URL` — строка подключения к Postgres в Supabase (если задана, используется Postgres вместо SQLite).
+- `DATABASE_URL` — альтернативный URL подключения к Postgres (резервный вариант).
 - `ADMIN_EMAILS` — список email через запятую, которым сразу выдаётся роль admin.
 - `INVITE_TTL_DAYS` — срок действия инвайта в днях (по умолчанию 7).
 

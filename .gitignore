@@ -1,10 +1,13 @@
-﻿.venv/
+﻿# local env files
+.env
+.env.local
+.env.*.local
+!.env.example
+.venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.env
-.env.*
 .DS_Store
 Thumbs.db
 /data/*.db
