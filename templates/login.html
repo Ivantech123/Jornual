@@ -2,7 +2,7 @@
 
 {% block content %}
 <section class="auth-layout">
-  <div class="auth-card">
+  <div class="auth-card" data-auth-card>
     <div class="auth-header">
       <h1 data-auth-title>Вход в журнал</h1>
       <p class="muted" data-auth-subtitle>Авторизация для учителей. Доступ к журналу по инвайту.</p>
@@ -18,7 +18,7 @@
         Supabase не настроен. Укажите переменные SUPABASE_URL и SUPABASE_ANON_KEY.
       </div>
     {% else %}
-      <form class="form-grid" data-auth-form novalidate>
+      <form class="form-grid auth-form" data-auth-form novalidate>
         <input type="hidden" name="action" value="login">
         <label>
           <span>Email</span>
@@ -36,7 +36,7 @@
           <button type="submit" class="primary" data-auth-submit>Войти</button>
         </div>
       </form>
-      <p class="auth-note" data-auth-note>При регистрации подтвердите email в письме от Supabase.</p>
+      <p class="auth-note" data-auth-note>После регистрации подтвердите email в письме.</p>
       <p class="auth-note" data-auth-status></p>
     {% endif %}
   </div>

@@ -45,10 +45,12 @@
   const submit = authForm.querySelector("[data-auth-submit]");
   const tabs = document.querySelectorAll("[data-auth-mode]");
   const signupOnly = authForm.querySelectorAll(".only-signup");
+  const card = document.querySelector("[data-auth-card]");
 
   const setMode = (mode) => {
     const isSignup = mode === "signup";
     if (actionField) actionField.value = mode;
+    authForm.classList.toggle("is-signup", isSignup);
     if (submit) submit.textContent = isSignup ? "Создать аккаунт" : "Войти";
     if (title) title.textContent = isSignup ? "Регистрация" : "Вход в журнал";
     if (subtitle) {
@@ -60,11 +62,16 @@
       note.style.display = isSignup ? "block" : "none";
     }
     signupOnly.forEach((field) => {
-      field.style.display = isSignup ? "block" : "none";
+      field.style.display = "block";
     });
     tabs.forEach((tab) => {
       tab.classList.toggle("is-active", tab.dataset.authMode === mode);
     });
+    if (card) {
+      card.classList.remove("is-switching");
+      void card.offsetWidth;
+      card.classList.add("is-switching");
+    }
   };
 
   tabs.forEach((tab) => {
@@ -115,6 +122,10 @@
     setStatus("Проверяем данные...");
 
     try {
+      if (submit) {
+        submit.classList.add("is-pressed");
+        setTimeout(() => submit.classList.remove("is-pressed"), 220);
+      }
       if (action === "signup" && confirm && password !== confirm.value) {
         setStatus("Пароли не совпадают.", true);
         return;

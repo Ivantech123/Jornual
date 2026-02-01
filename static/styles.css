@@ -585,7 +585,17 @@ textarea:focus {
 }
 
 .only-signup {
-  display: none;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-6px);
+  transition: max-height 0.35s ease, opacity 0.35s ease, transform 0.35s ease;
+}
+
+.auth-form.is-signup .only-signup {
+  max-height: 90px;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .auth-actions {
@@ -829,6 +839,26 @@ textarea:focus {
 .auth-tab.is-active {
   background: #ffffff;
   color: #0b0b0c;
+}
+
+.auth-card.is-switching {
+  animation: authSwitch 0.35s ease;
+}
+
+.primary.is-pressed {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes authSwitch {
+  from {
+    opacity: 0.75;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .segment span {
