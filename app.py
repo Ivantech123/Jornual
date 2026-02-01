@@ -3,11 +3,13 @@
 import math
 import os
 import secrets
+import socket
 import sqlite3
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 import requests
 from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
@@ -74,6 +76,8 @@ DEFAULT_STUDENTS = [
     "Sherbaev",
 ]
 
+SCHEMA_READY = False
+
 
 def now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -96,11 +100,37 @@ def configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA busy_timeout = 3000")
 
 
+def connect_postgres():
+    import psycopg2
+
+    dsn = app.config["DATABASE"]
+    if not dsn:
+        raise RuntimeError("DATABASE URL is not configured.")
+
+    kwargs: Dict[str, Any] = {}
+    if "sslmode=" not in dsn:
+        kwargs["sslmode"] = "require"
+
+    try:
+        parsed = urlparse(dsn)
+        host = parsed.hostname
+        port = parsed.port or 5432
+        if host:
+            try:
+                info = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+                if info:
+                    kwargs["hostaddr"] = info[0][4][0]
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+    return psycopg2.connect(dsn, **kwargs)
+
+
 def ensure_schema() -> None:
     if is_postgres():
-        import psycopg2
-
-        conn = psycopg2.connect(app.config["DATABASE"])
+        conn = connect_postgres()
         schema_sql = """
         CREATE TABLE IF NOT EXISTS students (
             student_id TEXT PRIMARY KEY,
@@ -220,10 +250,9 @@ def ensure_schema() -> None:
 def get_db():
     if "db" not in g:
         if is_postgres():
-            import psycopg2
             from psycopg2.extras import RealDictCursor
 
-            conn = psycopg2.connect(app.config["DATABASE"])
+            conn = connect_postgres()
             conn.autocommit = False
             g.db = conn
             g.db_cursor_factory = RealDictCursor
@@ -288,6 +317,16 @@ def close_db(exception: Exception | None = None) -> None:
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+@app.before_request
+def init_schema_once() -> None:
+    global SCHEMA_READY
+    if SCHEMA_READY:
+        return
+    ensure_schema()
+    seed_students_if_empty()
+    SCHEMA_READY = True
 
 
 def fetch_supabase_user(access_token: str) -> Dict[str, Any] | None:
@@ -741,8 +780,5 @@ def add_attendance(student_id: str) -> str:
 
 
 ensure_schema()
-seed_students_if_empty()
-
-
 if __name__ == "__main__":
     app.run(debug=True)
